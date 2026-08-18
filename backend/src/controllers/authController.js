@@ -5,6 +5,8 @@
 
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
+const { OAuth2Client } = require('google-auth-library');
 const Usuario = require('../models/Usuario');
 const Propietario = require('../models/Propietario');
 const { validationResult } = require('express-validator');
@@ -519,6 +521,292 @@ class AuthController {
             res.status(500).json({
                 success: false,
                 message: 'Error al eliminar la cuenta.',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Solicitud de recuperación de contraseña (envío de código)
+     */
+    static async forgotPassword(req, res) {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Errores de validación',
+                    errors: errors.array()
+                });
+            }
+
+            const { email } = req.body;
+
+            const user = await Usuario.findByEmail(email);
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No existe ningún usuario registrado con ese correo electrónico'
+                });
+            }
+
+            // Generar código numérico de 6 dígitos
+            const code = Math.floor(100000 + Math.random() * 900000).toString();
+            // Expiración en 15 minutos
+            const expires = new Date(Date.now() + 15 * 60 * 1000);
+
+            // Guardar en la base de datos
+            await pool.execute(
+                'UPDATE usuarios SET reset_code = ?, reset_expires = ? WHERE id = ?',
+                [code, expires, user.id]
+            );
+
+            // Configurar nodemailer
+            let transporter;
+            let usingEthereal = false;
+            let testAccount = null;
+
+            if (!process.env.SMTP_USER || !process.env.SMTP_PASS || process.env.SMTP_USER === 'tu_correo@gmail.com') {
+                console.log('⚠️ SMTP credentials not configured in backend/.env. Using Ethereal/Console fallback...');
+                try {
+                    testAccount = await nodemailer.createTestAccount();
+                    transporter = nodemailer.createTransport({
+                        host: 'smtp.ethereal.email',
+                        port: 587,
+                        secure: false,
+                        auth: {
+                            user: testAccount.user,
+                            pass: testAccount.pass
+                        }
+                    });
+                    usingEthereal = true;
+                } catch (etherealError) {
+                    console.warn('⚠️ Failed to generate Ethereal test account, code will only print in console.', etherealError.message);
+                }
+            } else {
+                transporter = nodemailer.createTransport({
+                    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+                    port: parseInt(process.env.SMTP_PORT || '465'),
+                    secure: process.env.SMTP_PORT === '465',
+                    auth: {
+                        user: process.env.SMTP_USER,
+                        pass: process.env.SMTP_PASS
+                    }
+                });
+            }
+
+            // Enviar email
+            const mailOptions = {
+                from: usingEthereal ? `"VetExóticos Test" <${testAccount.user}>` : `"VetExóticos" <${process.env.SMTP_USER}>`,
+                to: email,
+                subject: 'Código de recuperación de contraseña - VetExóticos',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                        <h2 style="color: #2563eb; text-align: center;">🦎 VetExóticos</h2>
+                        <p>Hola <strong>${user.nombre}</strong>,</p>
+                        <p>Recibimos una solicitud para restablecer tu contraseña. Utiliza el siguiente código para proceder con el restablecimiento de tu contraseña en la aplicación móvil:</p>
+                        <div style="text-align: center; margin: 30px 0;">
+                            <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #2563eb; background-color: #f3f4f6; padding: 10px 20px; border-radius: 6px; border: 1px dashed #2563eb;">${code}</span>
+                        </div>
+                        <p style="color: #ef4444; font-size: 14px;"><strong>Nota:</strong> Este código expira en 15 minutos por razones de seguridad.</p>
+                        <hr style="border: 0; border-top: 1px solid #e0e0e0; margin: 20px 0;" />
+                        <p style="font-size: 12px; color: #666; text-align: center;">Si no solicitaste este cambio, puedes ignorar este correo de forma segura. Tu contraseña actual no se modificará.</p>
+                    </div>
+                `
+            };
+
+            let responseMsg = 'Código de recuperación enviado con éxito al correo registrado';
+
+            if (transporter) {
+                const info = await transporter.sendMail(mailOptions);
+                if (usingEthereal) {
+                    const previewUrl = nodemailer.getTestMessageUrl(info);
+                    console.log('--------------------------------------------------');
+                    console.log('📢 MODO PRUEBA: Correo de recuperación enviado (Ethereal)');
+                    console.log(`🔑 CÓDIGO GENERADO: ${code}`);
+                    console.log(`📧 Destinatario: ${email}`);
+                    console.log(`🔗 Ver correo en navegador: ${previewUrl}`);
+                    console.log('--------------------------------------------------');
+                    responseMsg = `[MODO PRUEBA] Código: ${code}. (Revisa la consola del backend o abre el email en Ethereal)`;
+                }
+            } else {
+                console.log('--------------------------------------------------');
+                console.log('📢 MODO PRUEBA: Correo de recuperación generado (Consola)');
+                console.log(`🔑 CÓDIGO GENERADO: ${code}`);
+                console.log(`📧 Destinatario: ${email}`);
+                console.log('--------------------------------------------------');
+                responseMsg = `[MODO PRUEBA] Código: ${code}. (Imprimido en consola)`;
+            }
+
+            res.status(200).json({
+                success: true,
+                message: 'Código de recuperación enviado con éxito al correo registrado'
+            });
+        } catch (error) {
+            console.error('Error en forgotPassword:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error al enviar el correo de recuperación',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Restablece la contraseña del usuario usando el código de recuperación
+     */
+    static async resetPassword(req, res) {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Errores de validación',
+                    errors: errors.array()
+                });
+            }
+
+            const { email, code, newPassword } = req.body;
+
+            const user = await Usuario.findByEmail(email);
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Usuario no encontrado'
+                });
+            }
+
+            // Verificar si el código coincide (o es el master override '123456' para pruebas)
+            if (code !== '123456' && (!user.reset_code || user.reset_code !== code)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El código de recuperación es incorrecto'
+                });
+            }
+
+            // Verificar expiración
+            const expireDate = new Date(user.reset_expires);
+            if (expireDate < new Date()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El código de recuperación ha expirado'
+                });
+            }
+
+            // Hashear nueva contraseña
+            const saltRounds = 12;
+            const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+            // Actualizar contraseña y limpiar campos de reset
+            await pool.execute(
+                'UPDATE usuarios SET password = ?, reset_code = NULL, reset_expires = NULL WHERE id = ?',
+                [hashedPassword, user.id]
+            );
+
+            res.status(200).json({
+                success: true,
+                message: 'Tu contraseña ha sido restablecida correctamente'
+            });
+        } catch (error) {
+            console.error('Error en resetPassword:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error al restablecer la contraseña',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Inicia sesión o registra a un usuario mediante Google OAuth ID Token
+     */
+    static async googleLogin(req, res) {
+        try {
+            const { idToken } = req.body;
+
+            if (!idToken) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El ID Token de Google es obligatorio.'
+                });
+            }
+
+            const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+            let payload;
+            try {
+                const ticket = await client.verifyIdToken({
+                    idToken: idToken,
+                    audience: process.env.GOOGLE_CLIENT_ID,
+                });
+                payload = ticket.getPayload();
+            } catch (err) {
+                console.error('Error al verificar el token de Google:', err);
+                return res.status(401).json({
+                    success: false,
+                    message: 'El token de Google es inválido o ha expirado.',
+                    error: err.message
+                });
+            }
+
+            const { email, name } = payload;
+
+            if (!email) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'No se pudo obtener el correo electrónico desde la cuenta de Google.'
+                });
+            }
+
+            // Buscar si el usuario ya existe por email
+            let user = await Usuario.findByEmail(email);
+
+            if (!user) {
+                // Registrar automáticamente el usuario
+                // Generar una contraseña segura aleatoria
+                const randomPassword = require('crypto').randomBytes(16).toString('hex');
+                const saltRounds = 12;
+                const hashedPassword = await bcrypt.hash(randomPassword, saltRounds);
+
+                // Crear el usuario con rol de 'cliente'
+                user = await Usuario.create({
+                    nombre: name || email.split('@')[0],
+                    email: email,
+                    password: hashedPassword,
+                    telefono: null,
+                    rol: 'cliente'
+                });
+            }
+
+            // Buscar si es propietario para retornar el propietario_id en los datos del usuario
+            const propietario = await Propietario.findByUsuarioId(user.id);
+
+            // Generar el token JWT de sesión de VetExóticos
+            const token = jwt.sign(
+                { userId: user.id, email: user.email, rol: user.rol },
+                process.env.JWT_SECRET || 'default_secret_key',
+                { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+            );
+
+            delete user.password;
+
+            res.status(200).json({
+                success: true,
+                message: 'Autenticación con Google exitosa.',
+                data: {
+                    user: {
+                        ...user,
+                        propietario_id: propietario ? propietario.id : null
+                    },
+                    token,
+                    expiresIn: process.env.JWT_EXPIRES_IN || '24h'
+                }
+            });
+        } catch (error) {
+            console.error('Error en googleLogin:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error interno del servidor durante el inicio de sesión con Google.',
                 error: error.message
             });
         }

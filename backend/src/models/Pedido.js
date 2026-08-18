@@ -10,7 +10,7 @@ class Pedido {
      * Crea un nuevo pedido con sus detalles en una transacción
      */
     static async create(data) {
-        const { usuario_id, items, codigo_retiro } = data;
+        const { usuario_id, items, codigo_retiro, metodo_pago, comprobante_pago } = data;
         
         let connection;
         try {
@@ -50,16 +50,18 @@ class Pedido {
 
             const calculatedTotal = calculatedSubtotal + calculatedIva;
 
+            const initialEstado = 'pendiente';
+
             // 2. Insertar cabecera del pedido (vincular usuario_id y usuarios_id para soportar ambas llaves)
             const [orderResult] = await connection.query(
-                `INSERT INTO pedidos (usuario_id, usuarios_id, subtotal, iva, total, codigo_retiro, estado) 
-                 VALUES (?, ?, ?, ?, ?, ?, 'pendiente')`,
-                [usuario_id, usuario_id, calculatedSubtotal, calculatedIva, calculatedTotal, codigo_retiro]
+                `INSERT INTO pedidos (usuario_id, usuarios_id, subtotal, iva, total, codigo_retiro, estado, metodo_pago, comprobante_pago) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [usuario_id, usuario_id, calculatedSubtotal, calculatedIva, calculatedTotal, codigo_retiro, initialEstado, metodo_pago || 'efectivo', comprobante_pago || null]
             );
             
             const pedidoId = orderResult.insertId;
 
-            // 3. Insertar detalles del pedido y restar stock
+            // 3. Insertar detalles del pedido, restar stock y registrar salida de inventario
             for (const item of items) {
                 // Restar stock
                 const [stockResult] = await connection.query(
@@ -70,6 +72,13 @@ class Pedido {
                 if (stockResult.affectedRows === 0) {
                     throw new Error('No se pudo actualizar el stock.');
                 }
+
+                // Registrar movimiento de inventario de tipo 'salida'
+                await connection.query(
+                    `INSERT INTO movimientos_inventario (producto_id, tipo, cantidad, motivo, usuario_id) 
+                     VALUES (?, 'salida', ?, ?, ?)`,
+                    [item.producto_id, item.cantidad, `Compra en tienda - Pedido ${codigo_retiro}`, usuario_id]
+                );
 
                 // Insertar fila en detalles_pedido (pedido_id y pedidos_id, producto_id y productos_id)
                 await connection.query(
@@ -98,6 +107,22 @@ class Pedido {
             if (connection) {
                 connection.release();
             }
+        }
+    }
+
+    /**
+     * Busca un pedido por su ID
+     */
+    static async findById(id) {
+        try {
+            const [rows] = await pool.execute(
+                'SELECT * FROM pedidos WHERE id = ?',
+                [id]
+            );
+            return rows[0] || null;
+        } catch (error) {
+            console.error('Error en Pedido.findById:', error);
+            throw new Error('Error al buscar el pedido');
         }
     }
 
@@ -221,15 +246,104 @@ class Pedido {
      * Actualiza el estado de un pedido (ej: marcar como retirado, listo, cancelado)
      */
     static async updateEstado(id, estado) {
+        let connection;
         try {
-            const [result] = await pool.execute(
+            connection = await pool.getConnection();
+            await connection.beginTransaction();
+
+            // 1. Obtener la cabecera del pedido
+            const [orderRows] = await connection.query(
+                'SELECT codigo_retiro, estado FROM pedidos WHERE id = ? FOR UPDATE',
+                [id]
+            );
+            const order = orderRows[0];
+            if (!order) {
+                throw new Error('Pedido no encontrado.');
+            }
+
+            const oldEstado = order.estado;
+
+            // 2. Actualizar el estado del pedido
+            const [result] = await connection.query(
                 'UPDATE pedidos SET estado = ? WHERE id = ?',
                 [estado, id]
             );
+
+            // 3. Si pasa a retirado o pagado, actualizar los motivos y la fecha de los movimientos de inventario asociados
+            if (estado === 'retirado' || estado === 'pagado') {
+                const oldMotivo1 = `Compra en tienda - Pedido ${order.codigo_retiro}`;
+                const oldMotivo2 = `Entregado en tienda - Pedido ${order.codigo_retiro}`;
+                const newMotivo = `Pedido Completado y Pagado - ${order.codigo_retiro}`;
+                await connection.query(
+                    `UPDATE movimientos_inventario 
+                     SET motivo = ?, fecha = CURRENT_TIMESTAMP 
+                     WHERE motivo = ? OR motivo = ?`,
+                    [newMotivo, oldMotivo1, oldMotivo2]
+                );
+            }
+
+            // 4. Si pasa a cancelado y antes no lo estaba, devolver el stock y registrar movimientos de entrada o reversión
+            if (estado === 'cancelado' && oldEstado !== 'cancelado') {
+                const [detailRows] = await connection.query(
+                    "SELECT * FROM detalles_pedido WHERE pedido_id = ? OR pedidos_id = ?",
+                    [id, id]
+                );
+
+                for (const item of detailRows) {
+                    const prodId = item.producto_id || item.productos_id;
+                    
+                    // Devolver stock
+                    await connection.query(
+                        "UPDATE productos SET stock = stock + ? WHERE id = ?",
+                        [item.cantidad, prodId]
+                    );
+
+                    // Registrar movimiento de entrada por devolución
+                    await connection.query(
+                        `INSERT INTO movimientos_inventario (producto_id, tipo, cantidad, motivo, usuario_id) 
+                         VALUES (?, 'entrada', ?, ?, ?)`,
+                        [prodId, item.cantidad, `Devolución por cancelación - Pedido ${order.codigo_retiro}`, 1] // Usar ID de administrador por defecto
+                    );
+                }
+            }
+
+            // 5. Si antes estaba cancelado y pasa a otro estado (por ejemplo, pendiente o listo), volver a descontar el stock y registrar salida
+            if (oldEstado === 'cancelado' && estado !== 'cancelado') {
+                const [detailRows] = await connection.query(
+                    "SELECT * FROM detalles_pedido WHERE pedido_id = ? OR pedidos_id = ?",
+                    [id, id]
+                );
+
+                for (const item of detailRows) {
+                    const prodId = item.producto_id || item.productos_id;
+                    
+                    // Descontar stock
+                    await connection.query(
+                        "UPDATE productos SET stock = stock - ? WHERE id = ?",
+                        [item.cantidad, prodId]
+                    );
+
+                    // Registrar salida de nuevo
+                    await connection.query(
+                        `INSERT INTO movimientos_inventario (producto_id, tipo, cantidad, motivo, usuario_id) 
+                         VALUES (?, 'salida', ?, ?, ?)`,
+                        [prodId, item.cantidad, `Compra en tienda - Pedido ${order.codigo_retiro}`, 1]
+                    );
+                }
+            }
+
+            await connection.commit();
             return result.affectedRows > 0;
         } catch (error) {
+            if (connection) {
+                await connection.rollback();
+            }
             console.error('Error en Pedido.updateEstado:', error);
-            throw new Error('Error al actualizar el estado del pedido');
+            throw error;
+        } finally {
+            if (connection) {
+                connection.release();
+            }
         }
     }
 }

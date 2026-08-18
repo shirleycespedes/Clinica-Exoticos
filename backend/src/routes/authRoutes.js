@@ -9,7 +9,9 @@ const AuthController = require('../controllers/authController');
 const { authenticateToken } = require('../middleware/auth');
 const { 
     validateRegister, 
-    validateLogin 
+    validateLogin,
+    validateForgotPassword,
+    validateResetPassword
 } = require('../middleware/validation');
 
 /**
@@ -25,6 +27,27 @@ router.post('/register', validateRegister, AuthController.register);
  * @access Public
  */
 router.post('/login', validateLogin, AuthController.login);
+
+/**
+ * @route POST /auth/forgot-password
+ * @description Envía un código de recuperación al email del usuario
+ * @access Public
+ */
+router.post('/forgot-password', validateForgotPassword, AuthController.forgotPassword);
+
+/**
+ * @route POST /auth/reset-password
+ * @description Reestablece la contraseña del usuario con un código de recuperación
+ * @access Public
+ */
+router.post('/reset-password', validateResetPassword, AuthController.resetPassword);
+
+/**
+ * @route POST /auth/google
+ * @description Inicia sesión o registra un usuario usando Google OAuth ID Token
+ * @access Public
+ */
+router.post('/google', AuthController.googleLogin);
 
 /**
  * @route GET /auth/profile

@@ -19,7 +19,7 @@ class PedidoController {
 
         try {
             const userId = req.user.userId;
-            const { items, total } = req.body;
+            const { items, total, metodo_pago, comprobante_pago } = req.body;
 
             // Generar código de retiro aleatorio de 6 dígitos con prefijo VET-
             const randomCode = Math.floor(100000 + Math.random() * 900000);
@@ -29,7 +29,9 @@ class PedidoController {
                 usuario_id: userId,
                 items,
                 total: parseFloat(total),
-                codigo_retiro
+                codigo_retiro,
+                metodo_pago,
+                comprobante_pago
             });
 
             res.status(201).json({

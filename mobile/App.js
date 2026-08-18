@@ -6,6 +6,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import LoginScreen from './src/screen/LoginScreen';
 import DashboardScreen from './src/screen/DashboardScreen';
 import RegisterScreen from './src/screen/RegisterScreen';
+import ForgotPasswordScreen from './src/screen/ForgotPasswordScreen';
 import MascotasScreen from './src/screen/MascotasScreen';
 import ExpedientesScreen from './src/screen/ExpedientesScreen';
 import AgendarCitaScreen from './src/screen/AgendarCitaScreen';
@@ -49,6 +50,11 @@ export default function App() {
                 <Stack.Screen 
                     name="Register" 
                     component={RegisterScreen} 
+                    options={{ headerShown: false }}
+                />
+                <Stack.Screen 
+                    name="ForgotPassword" 
+                    component={ForgotPasswordScreen} 
                     options={{ headerShown: false }}
                 />
                 <Stack.Screen 

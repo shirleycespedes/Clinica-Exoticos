@@ -37,6 +37,7 @@ const getProductEmoji = (nombre) => {
 const getStatusColor = (status) => {
     switch (status) {
         case 'pendiente': return { bg: '#fef3c7', text: '#b45309', label: 'Pendiente' };
+        case 'pagado': return { bg: '#e0f2fe', text: '#0369a1', label: 'Pagado' };
         case 'preparando': return { bg: '#dbeafe', text: '#1e40af', label: 'Preparando' };
         case 'listo': return { bg: '#dcfce7', text: '#15803d', label: 'Listo para Retiro' };
         case 'retirado': return { bg: '#f1f5f9', text: '#475569', label: 'Retirado / Entregado' };
@@ -47,15 +48,16 @@ const getStatusColor = (status) => {
 
 export default function InventarioScreen({ navigation }) {
     const [user, setUser] = useState(null);
-    const [activeTab, setActiveTab] = useState('inventario'); // 'inventario' | 'pedidos'
+    const [activeTab, setActiveTab] = useState('inventario'); // 'inventario' | 'pedidos' | 'movimientos'
     const [productos, setProductos] = useState([]);
     const [pedidos, setPedidos] = useState([]);
+    const [movimientos, setMovimientos] = useState([]);
     
-    // Order Filter State
-    const [orderFilter, setOrderFilter] = useState('todos'); // 'todos' | 'pendiente' | 'preparando' | 'listo' | 'retirado' | 'cancelado'
+    const [orderFilter, setOrderFilter] = useState('todos'); // 'todos' | 'pendiente' | 'pagado' | 'preparando' | 'listo' | 'retirado' | 'cancelado'
 
     const [loadingProducts, setLoadingProducts] = useState(true);
     const [loadingOrders, setLoadingOrders] = useState(false);
+    const [loadingMovimientos, setLoadingMovimientos] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
 
     // Product Form Modal States
@@ -69,6 +71,17 @@ export default function InventarioScreen({ navigation }) {
     const [iva, setIva] = useState('13');
     const [searchQuery, setSearchQuery] = useState('');
     const [formErrors, setFormErrors] = useState({});
+
+    // Movimiento Modal States
+    const [movementModalVisible, setMovementModalVisible] = useState(false);
+    const [selectedMovProduct, setSelectedMovProduct] = useState(null);
+    const [movTipo, setMovTipo] = useState('entrada'); // 'entrada' | 'salida'
+    const [movCantidad, setMovCantidad] = useState('');
+    const [movMotivo, setMovMotivo] = useState('');
+    const [productDropdownOpen, setProductDropdownOpen] = useState(false);
+    const [movTypeFilter, setMovTypeFilter] = useState('todos'); // 'todos' | 'entrada' | 'salida'
+    const [movSortOrder, setMovSortOrder] = useState('desc'); // 'desc' | 'asc'
+    const [movSourceFilter, setMovSourceFilter] = useState('todos'); // 'todos' | 'pedidos'
 
     // Order Details Modal States
     const [detailsModalVisible, setDetailsModalVisible] = useState(false);
@@ -122,6 +135,100 @@ export default function InventarioScreen({ navigation }) {
         }
     };
 
+    const loadMovimientos = async () => {
+        setLoadingMovimientos(true);
+        try {
+            const response = await api.get('/inventario/movimientos');
+            if (response.data.success) {
+                setMovimientos(response.data.data);
+            }
+        } catch (err) {
+            console.error('Error al cargar movimientos:', err);
+            showAlert('Error', 'No se pudo cargar el historial de movimientos.');
+        } finally {
+            setLoadingMovimientos(false);
+        }
+    };
+
+    const handleExport = async (formato, modulo) => {
+        try {
+            const token = await AsyncStorage.getItem('token');
+            const baseUrl = api.defaults.baseURL;
+            const url = `${baseUrl}/reportes/exportar/${formato}/${modulo}?token=${token}`;
+            if (Platform.OS === 'web') {
+                window.open(url, '_blank');
+            } else {
+                const { Linking } = require('react-native');
+                Linking.openURL(url);
+            }
+        } catch (err) {
+            console.error(err);
+            showAlert('Error', 'No se pudo descargar el reporte.');
+        }
+    };
+
+    const handleDownloadInvoice = async (pedidoId) => {
+        try {
+            const token = await AsyncStorage.getItem('token');
+            const baseUrl = api.defaults.baseURL;
+            const url = `${baseUrl}/reportes/factura/${pedidoId}?token=${token}`;
+            if (Platform.OS === 'web') {
+                window.open(url, '_blank');
+            } else {
+                const { Linking } = require('react-native');
+                Linking.openURL(url);
+            }
+        } catch (err) {
+            console.error(err);
+            showAlert('Error', 'No se pudo descargar la factura.');
+        }
+    };
+
+    const openMovementModal = (product) => {
+        setSelectedMovProduct(product);
+        setMovTipo('entrada');
+        setMovCantidad('');
+        setMovMotivo('');
+        setMovementModalVisible(true);
+    };
+
+    const handleRegisterMovement = async () => {
+        if (!selectedMovProduct) {
+            showAlert('Validación', 'Por favor selecciona un producto.');
+            return;
+        }
+        if (!movCantidad || parseInt(movCantidad) <= 0) {
+            showAlert('Validación', 'Por favor ingresa una cantidad válida mayor a 0.');
+            return;
+        }
+        if (!movMotivo.trim()) {
+            showAlert('Validación', 'Por favor ingresa un motivo para el movimiento.');
+            return;
+        }
+
+        setActionLoading(true);
+        try {
+            const response = await api.post('/inventario/movimientos', {
+                producto_id: selectedMovProduct.id,
+                tipo: movTipo,
+                cantidad: parseInt(movCantidad),
+                motivo: movMotivo
+            });
+
+            if (response.data.success) {
+                showAlert('Éxito', `Movimiento de ${movTipo} registrado correctamente.`);
+                setMovementModalVisible(false);
+                loadProducts(); // Recargar productos para actualizar stock en la UI
+                loadMovimientos(); // Recargar movimientos para actualizar el historial en la UI
+            }
+        } catch (err) {
+            console.error('Error al registrar movimiento:', err);
+            showAlert('Error', err.response?.data?.message || 'No se pudo registrar el movimiento.');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
     useEffect(() => {
         loadUser();
         loadProducts();
@@ -130,6 +237,8 @@ export default function InventarioScreen({ navigation }) {
     useEffect(() => {
         if (activeTab === 'pedidos') {
             loadAllOrders();
+        } else if (activeTab === 'movimientos') {
+            loadMovimientos();
         } else {
             loadProducts();
         }
@@ -290,6 +399,27 @@ export default function InventarioScreen({ navigation }) {
                (p.usuario_email || '').toLowerCase().includes(q);
     });
 
+    const filteredMovimientos = movimientos
+        .filter(m => {
+            // Filtro por tipo (entrada/salida)
+            if (movTypeFilter !== 'todos' && m.tipo !== movTypeFilter) return false;
+
+            // Filtro por origen (solo pedidos)
+            if (movSourceFilter === 'pedidos' && !m.motivo.toLowerCase().includes('pedido')) return false;
+
+            const q = searchQuery.toLowerCase().trim();
+            if (!q) return true;
+            return (m.producto_nombre || '').toLowerCase().includes(q) ||
+                   (m.motivo || '').toLowerCase().includes(q) ||
+                   (m.usuario_nombre || '').toLowerCase().includes(q) ||
+                   (m.tipo || '').toLowerCase().includes(q);
+        })
+        .sort((a, b) => {
+            const dateA = new Date(a.fecha);
+            const dateB = new Date(b.fecha);
+            return movSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+        });
+
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
@@ -302,6 +432,21 @@ export default function InventarioScreen({ navigation }) {
                 {activeTab === 'inventario' && (
                     <TouchableOpacity style={styles.headerAddBtn} onPress={openAddProductModal}>
                         <Text style={styles.headerAddBtnText}>➕ Nuevo Producto</Text>
+                    </TouchableOpacity>
+                )}
+                {activeTab === 'movimientos' && (
+                    <TouchableOpacity 
+                        style={[styles.headerAddBtn, { backgroundColor: '#2563eb' }]} 
+                        onPress={() => {
+                            setSelectedMovProduct(null);
+                            setMovTipo('entrada');
+                            setMovCantidad('');
+                            setMovMotivo('');
+                            setProductDropdownOpen(false);
+                            setMovementModalVisible(true);
+                        }}
+                    >
+                        <Text style={styles.headerAddBtnText}>➕ Registrar Movimiento</Text>
                     </TouchableOpacity>
                 )}
             </View>
@@ -321,7 +466,15 @@ export default function InventarioScreen({ navigation }) {
                     onPress={() => setActiveTab('pedidos')}
                 >
                     <Text style={[styles.tabButtonText, activeTab === 'pedidos' && styles.tabButtonTextActive]}>
-                        📋 Pedidos Clientes
+                        📋 Pedidos
+                    </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={[styles.tabButton, activeTab === 'movimientos' && styles.tabButtonActive]}
+                    onPress={() => setActiveTab('movimientos')}
+                >
+                    <Text style={[styles.tabButtonText, activeTab === 'movimientos' && styles.tabButtonTextActive]}>
+                        🔄 Movimientos
                     </Text>
                 </TouchableOpacity>
             </View>
@@ -337,6 +490,21 @@ export default function InventarioScreen({ navigation }) {
                                 onChangeText={setSearchQuery}
                                 placeholderTextColor="#94a3b8"
                             />
+                            {/* Export Buttons */}
+                            <View style={[styles.exportButtonsContainer, { paddingHorizontal: 0, paddingTop: 8, paddingBottom: 0 }]}>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportExcelBtn]} 
+                                    onPress={() => handleExport('excel', 'inventario')}
+                                >
+                                    <Text style={styles.exportExcelBtnText}>📊 Exportar Excel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportPdfBtn]} 
+                                    onPress={() => handleExport('pdf', 'inventario')}
+                                >
+                                    <Text style={styles.exportPdfBtnText}>📄 Exportar PDF</Text>
+                                </TouchableOpacity>
+                            </View>
                         </View>
                     )}
                     <ScrollView contentContainerStyle={styles.listContent} persistentScrollbar={true}>
@@ -374,6 +542,12 @@ export default function InventarioScreen({ navigation }) {
                                             </Text>
                                         </TouchableOpacity>
                                         <TouchableOpacity 
+                                            style={styles.movementBtn} 
+                                            onPress={() => openMovementModal(p)}
+                                        >
+                                            <Text style={styles.movementBtnText}>🔄 Movimiento</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity 
                                             style={styles.editBtn} 
                                             onPress={() => openEditProductModal(p)}
                                         >
@@ -385,7 +559,7 @@ export default function InventarioScreen({ navigation }) {
                         )}
                     </ScrollView>
                 </View>
-            ) : (
+            ) : activeTab === 'pedidos' ? (
                 <View style={{ flex: 1 }}>
                     {/* Status Tabs Filter */}
                     <ScrollView 
@@ -394,7 +568,7 @@ export default function InventarioScreen({ navigation }) {
                         style={styles.statusFiltersScroll}
                         contentContainerStyle={styles.statusFilters}
                     >
-                        {['todos', 'pendiente', 'preparando', 'listo', 'retirado', 'cancelado'].map(f => (
+                        {['todos', 'pendiente', 'pagado', 'preparando', 'listo', 'retirado', 'cancelado'].map(f => (
                             <TouchableOpacity
                                 key={f}
                                 style={[styles.filterChip, orderFilter === f && styles.filterChipActive]}
@@ -416,6 +590,21 @@ export default function InventarioScreen({ navigation }) {
                                 onChangeText={setSearchQuery}
                                 placeholderTextColor="#94a3b8"
                             />
+                            {/* Export Buttons */}
+                            <View style={[styles.exportButtonsContainer, { paddingHorizontal: 0, paddingTop: 8, paddingBottom: 0 }]}>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportExcelBtn]} 
+                                    onPress={() => handleExport('excel', 'pedidos')}
+                                >
+                                    <Text style={styles.exportExcelBtnText}>📊 Exportar Excel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportPdfBtn]} 
+                                    onPress={() => handleExport('pdf', 'pedidos')}
+                                >
+                                    <Text style={styles.exportPdfBtnText}>📄 Exportar PDF</Text>
+                                </TouchableOpacity>
+                            </View>
                         </View>
                     )}
 
@@ -434,6 +623,11 @@ export default function InventarioScreen({ navigation }) {
                                                 <Text style={styles.orderCode}>Código: {o.codigo_retiro}</Text>
                                                 <Text style={styles.orderDate}>Fecha: {new Date(o.fecha_pedido).toLocaleDateString()}</Text>
                                                 <Text style={styles.orderClient}>👤 Cliente: {o.usuario_nombre} ({o.usuario_email})</Text>
+                                                {o.metodo_pago && (
+                                                    <Text style={{ fontSize: 11, color: '#475569', marginTop: 3, fontWeight: '600' }}>
+                                                        💰 Pago: {o.metodo_pago === 'tilopay' ? '💳 Tilopay (Tarjeta)' : o.metodo_pago === 'sinpe' ? `📱 SINPE Móvil (Ref: ${o.comprobante_pago || 'N/A'})` : '💵 Efectivo'}
+                                                    </Text>
+                                                )}
                                             </View>
                                             <View style={[styles.statusBadge, { backgroundColor: statusInfo.bg }]}>
                                                 <Text style={[styles.statusText, { color: statusInfo.text }]}>
@@ -444,9 +638,17 @@ export default function InventarioScreen({ navigation }) {
 
                                         {/* Actions Workflow Bar */}
                                         <View style={styles.orderActionsRow}>
-                                            <TouchableOpacity style={styles.detailsBtn} onPress={() => fetchOrderDetails(o)}>
-                                                <Text style={styles.detailsBtnText}>🔍 Ver Detalle</Text>
-                                            </TouchableOpacity>
+                                            <View style={{ flexDirection: 'row', gap: 6 }}>
+                                                <TouchableOpacity style={styles.detailsBtn} onPress={() => fetchOrderDetails(o)}>
+                                                    <Text style={styles.detailsBtnText}>🔍 Ver Detalle</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity 
+                                                    style={[styles.detailsBtn, { backgroundColor: '#f8fafc' }]} 
+                                                    onPress={() => handleDownloadInvoice(o.id)}
+                                                >
+                                                    <Text style={styles.detailsBtnText}>📄 Factura PDF</Text>
+                                                </TouchableOpacity>
+                                            </View>
 
                                             <View style={styles.statusWorkflowBtns}>
                                                 {o.estado === 'pendiente' && (
@@ -505,7 +707,252 @@ export default function InventarioScreen({ navigation }) {
                         )}
                     </ScrollView>
                 </View>
+            ) : (
+                <View style={{ flex: 1 }}>
+                    {!loadingMovimientos && (
+                        <View style={styles.searchContainer}>
+                            <TextInput
+                                style={styles.searchInput}
+                                placeholder="🔍 Buscar movimiento por producto, motivo..."
+                                value={searchQuery}
+                                onChangeText={setSearchQuery}
+                                placeholderTextColor="#94a3b8"
+                            />
+                            {/* Export Buttons */}
+                            <View style={[styles.exportButtonsContainer, { paddingHorizontal: 0, paddingTop: 8, paddingBottom: 0 }]}>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportExcelBtn]} 
+                                    onPress={() => handleExport('excel', 'inventario')}
+                                >
+                                    <Text style={styles.exportExcelBtnText}>📊 Exportar Excel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportPdfBtn]} 
+                                    onPress={() => handleExport('pdf', 'inventario')}
+                                >
+                                    <Text style={styles.exportPdfBtnText}>📄 Exportar PDF</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
+                    
+                    {!loadingMovimientos && (
+                        <View style={{ paddingHorizontal: 15, paddingBottom: 10 }}>
+                            {/* Filters Bar */}
+                            <View style={{ flexDirection: 'column', gap: 8, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#e2e8f0' }}>
+                                {/* Row 1: Tipo de Movimiento */}
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#64748b', marginRight: 4 }}>Tipo:</Text>
+                                    <TouchableOpacity 
+                                        style={[{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 15, borderWidth: 1, borderColor: '#cbd5e1' }, movTypeFilter === 'todos' && { backgroundColor: '#e2e8f0', borderColor: '#94a3b8' }]}
+                                        onPress={() => setMovTypeFilter('todos')}
+                                    >
+                                        <Text style={{ fontSize: 11, color: '#334155', fontWeight: movTypeFilter === 'todos' ? 'bold' : 'normal' }}>Todos</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity 
+                                        style={[{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 15, borderWidth: 1, borderColor: '#cbd5e1', backgroundColor: '#f0fdf4' }, movTypeFilter === 'entrada' && { backgroundColor: '#dcfce7', borderColor: '#86efac' }]}
+                                        onPress={() => setMovTypeFilter('entrada')}
+                                    >
+                                        <Text style={{ fontSize: 11, color: '#16a34a', fontWeight: movTypeFilter === 'entrada' ? 'bold' : 'normal' }}>➕ Entradas</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity 
+                                        style={[{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 15, borderWidth: 1, borderColor: '#cbd5e1', backgroundColor: '#fef2f2' }, movTypeFilter === 'salida' && { backgroundColor: '#fee2e2', borderColor: '#fca5a5' }]}
+                                        onPress={() => setMovTypeFilter('salida')}
+                                    >
+                                        <Text style={{ fontSize: 11, color: '#ef4444', fontWeight: movTypeFilter === 'salida' ? 'bold' : 'normal' }}>➖ Salidas</Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                {/* Row 2: Origen y Orden */}
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#64748b', marginRight: 4 }}>Origen:</Text>
+                                        <TouchableOpacity 
+                                            style={[{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 15, borderWidth: 1, borderColor: '#cbd5e1' }, movSourceFilter === 'todos' && { backgroundColor: '#e2e8f0', borderColor: '#94a3b8' }]}
+                                            onPress={() => setMovSourceFilter('todos')}
+                                        >
+                                            <Text style={{ fontSize: 11, color: '#334155', fontWeight: movSourceFilter === 'todos' ? 'bold' : 'normal' }}>Todos</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity 
+                                            style={[{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 15, borderWidth: 1, borderColor: '#cbd5e1', backgroundColor: '#f0f9ff' }, movSourceFilter === 'pedidos' && { backgroundColor: '#e0f2fe', borderColor: '#bae6fd' }]}
+                                            onPress={() => setMovSourceFilter('pedidos')}
+                                        >
+                                            <Text style={{ fontSize: 11, color: '#0284c7', fontWeight: movSourceFilter === 'pedidos' ? 'bold' : 'normal' }}>📋 Solo Pedidos</Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <TouchableOpacity 
+                                        style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: '#cbd5e1', backgroundColor: '#f8fafc' }}
+                                        onPress={() => setMovSortOrder(movSortOrder === 'desc' ? 'asc' : 'desc')}
+                                    >
+                                        <Text style={{ fontSize: 11, color: '#475569', fontWeight: 'bold' }}>
+                                            📅 {movSortOrder === 'desc' ? 'Más Recientes' : 'Más Antiguos'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </View>
+                    )}
+                    
+                    <ScrollView contentContainerStyle={styles.listContent} persistentScrollbar={true}>
+                        {loadingMovimientos ? (
+                            <ActivityIndicator size="large" color="#2563eb" style={{ marginTop: 40 }} />
+                        ) : filteredMovimientos.length === 0 ? (
+                            <Text style={styles.noDataText}>No se encontraron movimientos registrados.</Text>
+                        ) : (
+                            filteredMovimientos.map(m => {
+                                const isEntrada = m.tipo === 'entrada';
+                                return (
+                                    <View key={m.id} style={styles.movementCard}>
+                                        <View style={styles.movementHeader}>
+                                            <Text style={styles.movementProduct}>{m.producto_nombre}</Text>
+                                            <View style={[styles.movementBadge, { backgroundColor: isEntrada ? '#dcfce7' : '#fee2e2' }]}>
+                                                <Text style={[styles.movementBadgeText, { color: isEntrada ? '#16a34a' : '#ef4444' }]}>
+                                                    {isEntrada ? 'ENTRADA' : 'SALIDA'}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                        <Text style={styles.movementQty}>Cantidad: {m.cantidad} uds</Text>
+                                        <Text style={styles.movementMotivo}>Motivo: {m.motivo}</Text>
+                                        <Text style={styles.movementDate}>
+                                            Registrado por: {m.usuario_nombre} ({m.usuario_email}) el {new Date(m.fecha).toLocaleString()}
+                                        </Text>
+                                    </View>
+                                );
+                            })
+                        )}
+                    </ScrollView>
+                </View>
             )}
+
+            {/* Modal de Movimiento de Inventario */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={movementModalVisible}
+                onRequestClose={() => setMovementModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>
+                            🔄 Registrar Movimiento de Stock
+                        </Text>
+                        {selectedMovProduct ? (
+                            <Text style={{ fontSize: 14, color: '#475569', marginBottom: 15 }}>
+                                Producto: <Text style={{ fontWeight: 'bold' }}>{selectedMovProduct.nombre}</Text>
+                            </Text>
+                        ) : (
+                            <View style={{ zIndex: 1000, position: 'relative', marginBottom: 15 }}>
+                                <Text style={styles.label}>Producto *</Text>
+                                <TouchableOpacity 
+                                    style={[styles.input, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }]}
+                                    onPress={() => setProductDropdownOpen(!productDropdownOpen)}
+                                >
+                                    <Text style={{ color: selectedMovProduct ? '#1e293b' : '#94a3b8' }}>
+                                        {selectedMovProduct ? selectedMovProduct.nombre : 'Selecciona un producto...'}
+                                    </Text>
+                                    <Text style={{ color: '#64748b' }}>{productDropdownOpen ? '▲' : '▼'}</Text>
+                                </TouchableOpacity>
+                                
+                                {productDropdownOpen && (
+                                    <ScrollView style={{ 
+                                        position: 'absolute', 
+                                        top: 80, 
+                                        left: 0, 
+                                        right: 0, 
+                                        backgroundColor: '#ffffff', 
+                                        borderWidth: 1, 
+                                        borderColor: '#cbd5e1', 
+                                        borderRadius: 6, 
+                                        maxHeight: 180, 
+                                        shadowColor: '#000',
+                                        shadowOffset: { width: 0, height: 2 },
+                                        shadowOpacity: 0.1,
+                                        shadowRadius: 4,
+                                        elevation: 4,
+                                        zIndex: 2000 
+                                    }} nestedScrollEnabled={true}>
+                                        {productos.map(p => (
+                                            <TouchableOpacity 
+                                                key={p.id} 
+                                                style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}
+                                                onPress={() => {
+                                                    setSelectedMovProduct(p);
+                                                    setProductDropdownOpen(false);
+                                                }}
+                                            >
+                                                <Text style={{ color: '#1e293b', fontSize: 13 }}>{p.nombre} (Stock: {p.stock})</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </ScrollView>
+                                )}
+                            </View>
+                        )}
+
+                        <ScrollView style={{ marginBottom: 15 }}>
+                            <Text style={styles.label}>Tipo de Movimiento</Text>
+                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 5, marginBottom: 10 }}>
+                                <TouchableOpacity 
+                                    style={[styles.switchBtn, { flex: 1, borderRadius: 8, alignItems: 'center' }, movTipo === 'entrada' && styles.switchBtnActive]}
+                                    onPress={() => setMovTipo('entrada')}
+                                >
+                                    <Text style={[styles.switchBtnText, movTipo === 'entrada' && styles.switchBtnTextActive]}>
+                                        ➕ Entrada
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={[styles.switchBtn, { flex: 1, borderRadius: 8, alignItems: 'center' }, movTipo === 'salida' && styles.switchBtnActive]}
+                                    onPress={() => setMovTipo('salida')}
+                                >
+                                    <Text style={[styles.switchBtnText, movTipo === 'salida' && styles.switchBtnTextActive]}>
+                                        ➖ Salida
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <Text style={styles.label}>Cantidad *</Text>
+                            <TextInput 
+                                style={styles.input}
+                                placeholder="Ej. 10"
+                                value={movCantidad}
+                                onChangeText={setMovCantidad}
+                                keyboardType="numeric"
+                            />
+
+                            <Text style={styles.label}>Motivo *</Text>
+                            <TextInput 
+                                style={[styles.input, styles.textArea]}
+                                placeholder="Ej. Compra de mercancía a distribuidora, Merma por daño..."
+                                value={movMotivo}
+                                onChangeText={setMovMotivo}
+                                multiline
+                                numberOfLines={3}
+                            />
+                        </ScrollView>
+
+                        <View style={styles.modalActionButtons}>
+                            <TouchableOpacity 
+                                style={[styles.modalBtn, styles.cancelModalBtn]} 
+                                onPress={() => setMovementModalVisible(false)}
+                                disabled={actionLoading}
+                            >
+                                <Text style={styles.cancelModalBtnText}>Cancelar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[styles.modalBtn, styles.saveModalBtn]} 
+                                onPress={handleRegisterMovement}
+                                disabled={actionLoading}
+                            >
+                                {actionLoading ? (
+                                    <ActivityIndicator color="#ffffff" size="small" />
+                                ) : (
+                                    <Text style={styles.saveModalBtnText}>Registrar</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
 
             {/* Modal de Formulario de Producto (Crear / Editar) */}
             <Modal
@@ -1132,5 +1579,96 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         fontSize: 15,
         color: '#1e293b',
+    },
+    exportButtonsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        paddingHorizontal: 16,
+        paddingBottom: 10,
+        backgroundColor: '#f8fafc',
+        gap: 8,
+    },
+    exportBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 6,
+        borderWidth: 1,
+    },
+    exportExcelBtn: {
+        backgroundColor: '#f0fdf4',
+        borderColor: '#bbf7d0',
+    },
+    exportPdfBtn: {
+        backgroundColor: '#fef2f2',
+        borderColor: '#fca5a5',
+    },
+    exportExcelBtnText: {
+        color: '#16a34a',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    exportPdfBtnText: {
+        color: '#ef4444',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    movementCard: {
+        backgroundColor: '#ffffff',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+    },
+    movementHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 6,
+    },
+    movementBadge: {
+        borderRadius: 6,
+        paddingVertical: 2,
+        paddingHorizontal: 8,
+    },
+    movementBadgeText: {
+        fontSize: 10,
+        fontWeight: 'bold',
+    },
+    movementProduct: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: '#1e293b',
+    },
+    movementQty: {
+        fontSize: 13,
+        color: '#475569',
+        marginTop: 2,
+    },
+    movementMotivo: {
+        fontSize: 13,
+        color: '#64748b',
+        marginTop: 4,
+    },
+    movementDate: {
+        fontSize: 11,
+        color: '#94a3b8',
+        marginTop: 6,
+    },
+    movementBtn: {
+        backgroundColor: '#eff6ff',
+        borderWidth: 1,
+        borderColor: '#bfdbfe',
+        borderRadius: 6,
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        marginHorizontal: 4,
+    },
+    movementBtnText: {
+        fontSize: 12,
+        color: '#2563eb',
+        fontWeight: '600',
     },
 });

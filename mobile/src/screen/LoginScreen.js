@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View,
     Text,
@@ -11,15 +11,43 @@ import {
 } from 'react-native';
 import { login } from './authService';
 
-export default function LoginScreen({ navigation }) {
+export default function LoginScreen({ route, navigation }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
+    const [successMessage, setSuccessMessage] = useState('');
 
     // Estados de errores de validación
     const [emailError, setEmailError] = useState('');
     const [passwordError, setPasswordError] = useState('');
     const [generalError, setGeneralError] = useState('');
+
+    useEffect(() => {
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            try {
+                const msg = localStorage.getItem('resetSuccess');
+                if (msg) {
+                    setSuccessMessage(msg);
+                    localStorage.removeItem('resetSuccess');
+                }
+            } catch (err) {
+                console.warn('Error reading from localStorage:', err);
+            }
+        }
+    }, []);
+
+    // Limpiar campos y errores cuando la pantalla recibe foco
+    useEffect(() => {
+        const unsubscribe = navigation.addListener('focus', () => {
+            setEmail('');
+            setPassword('');
+            setEmailError('');
+            setPasswordError('');
+            setGeneralError('');
+        });
+
+        return unsubscribe;
+    }, [navigation]);
 
     const handleLogin = async () => {
         setEmailError('');
@@ -81,6 +109,20 @@ export default function LoginScreen({ navigation }) {
                 <Text style={styles.subtitle}>Clínica de Animales Exóticos</Text>
 
                 <View style={styles.form}>
+                    {/* Inputs invisibles para absorber el autocompletado automático de los navegadores */}
+                    {Platform.OS === 'web' && (
+                        <View style={{ position: 'absolute', width: 0, height: 0, opacity: 0, overflow: 'hidden' }} pointerEvents="none">
+                            <TextInput autoComplete="username" />
+                            <TextInput autoComplete="current-password" secureTextEntry />
+                        </View>
+                    )}
+
+                    {(successMessage || route?.params?.successMessage) ? (
+                        <View style={styles.successBanner}>
+                            <Text style={styles.successBannerText}>✅ {successMessage || route?.params?.successMessage}</Text>
+                        </View>
+                    ) : null}
+
                     {generalError ? (
                         <View style={styles.errorBanner}>
                             <Text style={styles.errorBannerText}>⚠️ {generalError}</Text>
@@ -95,6 +137,9 @@ export default function LoginScreen({ navigation }) {
                         onChangeText={text => { setEmail(text); setEmailError(''); }}
                         autoCapitalize="none"
                         keyboardType="email-address"
+                        autoComplete="new-password"
+                        textContentType="none"
+                        importantForAutofill="no"
                     />
                     {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
 
@@ -105,8 +150,18 @@ export default function LoginScreen({ navigation }) {
                         value={password}
                         onChangeText={text => { setPassword(text); setPasswordError(''); }}
                         secureTextEntry
+                        autoComplete="new-password"
+                        textContentType="none"
+                        importantForAutofill="no"
                     />
                     {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
+
+                    <TouchableOpacity 
+                        style={styles.forgotPasswordContainer} 
+                        onPress={() => navigation.navigate('ForgotPassword')}
+                    >
+                        <Text style={styles.forgotPasswordText}>¿Olvidaste tu contraseña?</Text>
+                    </TouchableOpacity>
 
                     <TouchableOpacity 
                         style={styles.button} 
@@ -204,6 +259,19 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         fontSize: 14,
     },
+    successBanner: {
+        backgroundColor: '#f0fdf4',
+        borderWidth: 1,
+        borderColor: '#bbf7d0',
+        borderRadius: 8,
+        padding: 12,
+        marginBottom: 20,
+    },
+    successBannerText: {
+        color: '#16a34a',
+        fontWeight: '600',
+        fontSize: 14,
+    },
     button: {
         backgroundColor: '#2563eb',
         padding: 15,
@@ -229,5 +297,15 @@ const styles = StyleSheet.create({
         color: '#2563eb',
         fontSize: 14,
         fontWeight: 'bold',
+    },
+    forgotPasswordContainer: {
+        alignSelf: 'flex-end',
+        marginBottom: 15,
+        marginTop: 0,
+    },
+    forgotPasswordText: {
+        color: '#2563eb',
+        fontSize: 14,
+        fontWeight: '600',
     },
 });

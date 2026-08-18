@@ -69,6 +69,26 @@ export default function ExpedientesScreen({ navigation }) {
     const [enfermedadesCronicas, setEnfermedadesCronicas] = useState('');
     const [vacunas, setVacunas] = useState('');
 
+    const handleExport = async (formato, modulo, expedienteId = null) => {
+        try {
+            const token = await AsyncStorage.getItem('token');
+            const baseUrl = api.defaults.baseURL;
+            let url = `${baseUrl}/reportes/exportar/${formato}/${modulo}?token=${token}`;
+            if (expedienteId) {
+                url += `&expedienteId=${expedienteId}`;
+            }
+            if (Platform.OS === 'web') {
+                window.open(url, '_blank');
+            } else {
+                const { Linking } = require('react-native');
+                Linking.openURL(url);
+            }
+        } catch (err) {
+            console.error(err);
+            showAlert('Error', 'No se pudo descargar el reporte.');
+        }
+    };
+
     const loadUserAndMascotas = async () => {
         try {
             const userData = await AsyncStorage.getItem('user');
@@ -253,7 +273,6 @@ export default function ExpedientesScreen({ navigation }) {
                     )}
                 </View>
 
-                {/* Buscador de Expedientes */}
                 {!loading && !error && (
                     <View style={styles.searchContainer}>
                         <TextInput
@@ -263,6 +282,23 @@ export default function ExpedientesScreen({ navigation }) {
                             onChangeText={setSearchQuery}
                             placeholderTextColor="#94a3b8"
                         />
+                        {/* Export Buttons */}
+                        {user && user.rol === 'admin' && (
+                            <View style={styles.exportButtonsContainer}>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportExcelBtn]} 
+                                    onPress={() => handleExport('excel', 'expedientes')}
+                                >
+                                    <Text style={styles.exportExcelBtnText}>📊 Exportar Excel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportPdfBtn]} 
+                                    onPress={() => handleExport('pdf', 'expedientes')}
+                                >
+                                    <Text style={styles.exportPdfBtnText}>📄 Exportar PDF</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
                     </View>
                 )}
 
@@ -337,19 +373,33 @@ export default function ExpedientesScreen({ navigation }) {
                                             <View style={styles.sectionCard}>
                                                 <View style={styles.sectionHeaderRow}>
                                                     <Text style={styles.sectionCardTitle}>Ficha Médica General</Text>
-                                                     {user && user.rol === 'admin' && (
-                                                         <View style={{ flexDirection: 'row' }}>
-                                                             <TouchableOpacity style={styles.editBadge} onPress={openFichaModal}>
-                                                                 <Text style={styles.editBadgeText}>✏️ Editar</Text>
-                                                             </TouchableOpacity>
-                                                             <TouchableOpacity 
-                                                                 style={[styles.editBadge, { backgroundColor: '#fee2e2', marginLeft: 8 }]} 
-                                                                 onPress={() => handleEliminarExpediente(expediente.id)}
-                                                             >
-                                                                 <Text style={[styles.editBadgeText, { color: '#ef4444' }]}>🗑️ Eliminar</Text>
-                                                             </TouchableOpacity>
-                                                         </View>
-                                                     )}
+                                                    <View style={{ flexDirection: 'row' }}>
+                                                        {user && user.rol === 'admin' && (
+                                                            <>
+                                                                <TouchableOpacity style={styles.editBadge} onPress={openFichaModal}>
+                                                                    <Text style={styles.editBadgeText}>✏️ Editar</Text>
+                                                                </TouchableOpacity>
+                                                                <TouchableOpacity 
+                                                                    style={[styles.editBadge, { backgroundColor: '#fee2e2', marginLeft: 8 }]} 
+                                                                    onPress={() => handleEliminarExpediente(expediente.id)}
+                                                                >
+                                                                    <Text style={[styles.editBadgeText, { color: '#ef4444' }]}>🗑️ Eliminar</Text>
+                                                                </TouchableOpacity>
+                                                            </>
+                                                        )}
+                                                        <TouchableOpacity 
+                                                            style={[styles.editBadge, { backgroundColor: '#f0fdf4', marginLeft: user && user.rol === 'admin' ? 8 : 0 }]} 
+                                                            onPress={() => handleExport('excel', 'expedientes', expediente.id)}
+                                                        >
+                                                            <Text style={[styles.editBadgeText, { color: '#16a34a' }]}>📊 Excel</Text>
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity 
+                                                            style={[styles.editBadge, { backgroundColor: '#fef2f2', marginLeft: 8 }]} 
+                                                            onPress={() => handleExport('pdf', 'expedientes', expediente.id)}
+                                                        >
+                                                            <Text style={[styles.editBadgeText, { color: '#ef4444' }]}>📄 PDF</Text>
+                                                        </TouchableOpacity>
+                                                    </View>
                                                 </View>
                                                 
                                                 <View style={styles.detailRow}>
@@ -827,5 +877,38 @@ const styles = StyleSheet.create({
         color: '#64748b',
         textAlign: 'center',
         paddingVertical: 30,
+    },
+    exportButtonsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        paddingTop: 10,
+        backgroundColor: '#f8fafc',
+        gap: 8,
+    },
+    exportBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 6,
+        borderWidth: 1,
+    },
+    exportExcelBtn: {
+        backgroundColor: '#f0fdf4',
+        borderColor: '#bbf7d0',
+    },
+    exportPdfBtn: {
+        backgroundColor: '#fef2f2',
+        borderColor: '#fca5a5',
+    },
+    exportExcelBtnText: {
+        color: '#16a34a',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    exportPdfBtnText: {
+        color: '#ef4444',
+        fontSize: 12,
+        fontWeight: '600',
     },
 });

@@ -44,6 +44,26 @@ export default function UsuariosScreen({ navigation }) {
         }
     };
 
+    const handleExport = async (formato, modulo, pacienteId = null) => {
+        try {
+            const token = await AsyncStorage.getItem('token');
+            const baseUrl = api.defaults.baseURL;
+            let url = `${baseUrl}/reportes/exportar/${formato}/${modulo}?token=${token}`;
+            if (pacienteId) {
+                url += `&pacienteId=${pacienteId}`;
+            }
+            if (Platform.OS === 'web') {
+                window.open(url, '_blank');
+            } else {
+                const { Linking } = require('react-native');
+                Linking.openURL(url);
+            }
+        } catch (err) {
+            console.error(err);
+            showAlert('Error', 'No se pudo descargar el reporte.');
+        }
+    };
+
     const handleDeleteUser = (item) => {
         const confirmDelete = () => {
             setLoading(true);
@@ -138,10 +158,24 @@ export default function UsuariosScreen({ navigation }) {
                             {item.mascotas && item.mascotas.length > 0 ? (
                                 <View style={styles.petsBadgeContainer}>
                                     {item.mascotas.map((pet, idx) => (
-                                        <View key={pet.id || idx} style={styles.petBadge}>
+                                        <View key={pet.id || idx} style={[styles.petBadge, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 6 }]}>
                                             <Text style={styles.petBadgeText}>
                                                 🐾 {pet.nombre} ({pet.especie})
                                             </Text>
+                                            <View style={{ flexDirection: 'row', gap: 4, marginLeft: 8 }}>
+                                                <TouchableOpacity 
+                                                    style={[styles.exportMiniBtn, { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }]} 
+                                                    onPress={() => handleExport('excel', 'pacientes', pet.id)}
+                                                >
+                                                    <Text style={{ color: '#16a34a', fontSize: 9, fontWeight: 'bold' }}>📊 Excel</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity 
+                                                    style={[styles.exportMiniBtn, { backgroundColor: '#fef2f2', borderColor: '#fca5a5' }]} 
+                                                    onPress={() => handleExport('pdf', 'pacientes', pet.id)}
+                                                >
+                                                    <Text style={{ color: '#ef4444', fontSize: 9, fontWeight: 'bold' }}>📄 PDF</Text>
+                                                </TouchableOpacity>
+                                            </View>
                                         </View>
                                     ))}
                                 </View>
@@ -188,7 +222,23 @@ export default function UsuariosScreen({ navigation }) {
                         placeholder="Buscar por nombre, email o teléfono..."
                         value={searchQuery}
                         onChangeText={setSearchQuery}
+                        placeholderTextColor="#94a3b8"
                     />
+                    {/* Export Buttons */}
+                    <View style={styles.exportButtonsContainer}>
+                        <TouchableOpacity 
+                            style={[styles.exportBtn, styles.exportExcelBtn]} 
+                            onPress={() => handleExport('excel', 'clientes')}
+                        >
+                            <Text style={styles.exportExcelBtnText}>📊 Exportar Excel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            style={[styles.exportBtn, styles.exportPdfBtn]} 
+                            onPress={() => handleExport('pdf', 'clientes')}
+                        >
+                            <Text style={styles.exportPdfBtnText}>📄 Exportar PDF</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
                 {/* Selector de Pestañas (Tabs) */}
@@ -445,5 +495,46 @@ const styles = StyleSheet.create({
         color: '#ef4444',
         fontSize: 13,
         fontWeight: 'bold',
+    },
+    exportButtonsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        paddingTop: 10,
+        backgroundColor: '#f8fafc',
+        gap: 8,
+    },
+    exportBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 6,
+        borderWidth: 1,
+    },
+    exportExcelBtn: {
+        backgroundColor: '#f0fdf4',
+        borderColor: '#bbf7d0',
+    },
+    exportPdfBtn: {
+        backgroundColor: '#fef2f2',
+        borderColor: '#fca5a5',
+    },
+    exportExcelBtnText: {
+        color: '#16a34a',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    exportPdfBtnText: {
+        color: '#ef4444',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    exportMiniBtn: {
+        paddingVertical: 2,
+        paddingHorizontal: 6,
+        borderRadius: 4,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 });

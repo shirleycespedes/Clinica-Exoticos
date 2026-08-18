@@ -4,6 +4,7 @@
  * @version 1.0.0
  */
 
+// Reinicio automático de Nodemon v2
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
@@ -20,6 +21,8 @@ const citaRoutes = require('./src/routes/citaRoutes');
 const consultaRoutes = require('./src/routes/consultaRoutes');
 const productoRoutes = require('./src/routes/productoRoutes');
 const pedidoRoutes = require('./src/routes/pedidoRoutes');
+const inventarioRoutes = require('./src/routes/inventarioRoutes');
+const reporteRoutes = require('./src/routes/reporteRoutes');
 
 // Crear aplicación Express
 const app = express();
@@ -105,6 +108,8 @@ app.use(`${API_PREFIX}/citas`, citaRoutes);
 app.use(`${API_PREFIX}/consultas`, consultaRoutes);
 app.use(`${API_PREFIX}/productos`, productoRoutes);
 app.use(`${API_PREFIX}/pedidos`, pedidoRoutes);
+app.use(`${API_PREFIX}/inventario`, inventarioRoutes);
+app.use(`${API_PREFIX}/reportes`, reporteRoutes);
 
 /**
  * MANEJO DE ERRORES

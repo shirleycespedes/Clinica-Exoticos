@@ -102,6 +102,26 @@ export default function MascotasScreen({ navigation }) {
         setPropNuevoEmail(userObj.email || '');
     };
 
+    const handleExport = async (formato, modulo, pacienteId = null) => {
+        try {
+            const token = await AsyncStorage.getItem('token');
+            const baseUrl = api.defaults.baseURL;
+            let url = `${baseUrl}/reportes/exportar/${formato}/${modulo}?token=${token}`;
+            if (pacienteId) {
+                url += `&pacienteId=${pacienteId}`;
+            }
+            if (Platform.OS === 'web') {
+                window.open(url, '_blank');
+            } else {
+                const { Linking } = require('react-native');
+                Linking.openURL(url);
+            }
+        } catch (err) {
+            console.error(err);
+            showAlert('Error', 'No se pudo descargar el reporte.');
+        }
+    };
+
     const loadUserAndMascotas = async () => {
         try {
             const userData = await AsyncStorage.getItem('user');
@@ -363,7 +383,6 @@ export default function MascotasScreen({ navigation }) {
                     )}
                 </View>
 
-                {/* Buscador de Pacientes */}
                 {!loading && !error && (
                     <View style={styles.searchContainer}>
                         <TextInput
@@ -373,6 +392,23 @@ export default function MascotasScreen({ navigation }) {
                             onChangeText={setSearchQuery}
                             placeholderTextColor="#94a3b8"
                         />
+                        {/* Export Buttons */}
+                        {user && user.rol === 'admin' && (
+                            <View style={styles.exportButtonsContainer}>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportExcelBtn]} 
+                                    onPress={() => handleExport('excel', 'pacientes')}
+                                >
+                                    <Text style={styles.exportExcelBtnText}>📊 Exportar Excel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportPdfBtn]} 
+                                    onPress={() => handleExport('pdf', 'pacientes')}
+                                >
+                                    <Text style={styles.exportPdfBtnText}>📄 Exportar PDF</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
                     </View>
                 )}
 
@@ -437,6 +473,20 @@ export default function MascotasScreen({ navigation }) {
                                 <>
                                     <Text style={styles.modalTitle}>🐾 Ficha de Paciente</Text>
                                     
+                                    <View style={styles.modalExportButtonsContainer}>
+                                        <TouchableOpacity 
+                                            style={[styles.exportBtn, styles.exportExcelBtn]} 
+                                            onPress={() => handleExport('excel', 'pacientes', selectedMascota.id)}
+                                        >
+                                            <Text style={styles.exportExcelBtnText}>📊 Exportar Excel</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity 
+                                            style={[styles.exportBtn, styles.exportPdfBtn]} 
+                                            onPress={() => handleExport('pdf', 'pacientes', selectedMascota.id)}
+                                        >
+                                            <Text style={styles.exportPdfBtnText}>📄 Exportar PDF</Text>
+                                        </TouchableOpacity>
+                                    </View>
                                     <View style={styles.detailRow}>
                                         <Text style={styles.detailLabel}>Nombre:</Text>
                                         <Text style={styles.detailValue}>{selectedMascota.nombre}</Text>
@@ -553,6 +603,22 @@ export default function MascotasScreen({ navigation }) {
                             🩺 Consultas de {selectedMascota?.nombre}
                         </Text>
                         
+                        {!loadingConsultas && consultas.length > 0 && (
+                            <View style={styles.modalExportButtonsContainer}>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportExcelBtn]} 
+                                    onPress={() => handleExport('excel', 'consultas', selectedMascota?.id)}
+                                >
+                                    <Text style={styles.exportExcelBtnText}>📊 Exportar Excel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, styles.exportPdfBtn]} 
+                                    onPress={() => handleExport('pdf', 'consultas', selectedMascota?.id)}
+                                >
+                                    <Text style={styles.exportPdfBtnText}>📄 Exportar PDF</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
                         {loadingConsultas ? (
                             <View style={styles.loadingContainer}>
                                 <ActivityIndicator size="large" color="#2563eb" />
@@ -1339,5 +1405,47 @@ const styles = StyleSheet.create({
         color: '#64748b',
         textAlign: 'center',
         paddingVertical: 30,
+    },
+    exportButtonsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        paddingTop: 10,
+        backgroundColor: '#f8fafc',
+        gap: 8,
+    },
+    exportBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 6,
+        borderWidth: 1,
+    },
+    exportExcelBtn: {
+        backgroundColor: '#f0fdf4',
+        borderColor: '#bbf7d0',
+    },
+    exportPdfBtn: {
+        backgroundColor: '#fef2f2',
+        borderColor: '#fca5a5',
+    },
+    exportExcelBtnText: {
+        color: '#16a34a',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    exportPdfBtnText: {
+        color: '#ef4444',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    modalExportButtonsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        paddingBottom: 12,
+        gap: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f1f5f9',
+        marginBottom: 10,
     },
 });

@@ -57,6 +57,37 @@ const validateLogin = [
         .notEmpty().withMessage('La contraseña es requerida')
 ];
 
+/**
+ * Validaciones para recuperación de contraseña (solicitud)
+ */
+const validateForgotPassword = [
+    body('email')
+        .trim()
+        .notEmpty().withMessage('El email es requerido')
+        .isEmail().withMessage('Debe ser un email válido')
+        .normalizeEmail()
+];
+
+/**
+ * Validaciones para restablecimiento de contraseña (confirmación)
+ */
+const validateResetPassword = [
+    body('email')
+        .trim()
+        .notEmpty().withMessage('El email es requerido')
+        .isEmail().withMessage('Debe ser un email válido')
+        .normalizeEmail(),
+    
+    body('code')
+        .trim()
+        .notEmpty().withMessage('El código de recuperación es requerido')
+        .isLength({ min: 6, max: 6 }).withMessage('El código debe tener exactamente 6 dígitos')
+        .isNumeric().withMessage('El código debe ser numérico'),
+
+    body('newPassword')
+        .isLength({ min: 6 }).withMessage('La nueva contraseña debe tener al menos 6 caracteres'),
+];
+
 // ============================================
 // VALIDACIONES DE PROPIETARIOS
 // ============================================
@@ -256,6 +287,8 @@ const validateExpediente = [
 module.exports = {
     validateRegister,
     validateLogin,
+    validateForgotPassword,
+    validateResetPassword,
     validatePropietario,
     validatePaciente,
     validateCita,

@@ -12,7 +12,12 @@ const Usuario = require('../models/Usuario');
 const authenticateToken = async (req, res, next) => {
     try {
         const authHeader = req.headers['authorization'];
-        const token = authHeader && authHeader.split(' ')[1];
+        let token = authHeader && authHeader.split(' ')[1];
+
+        // Permitir autenticación por query parameter para descargas directas de archivos
+        if (!token && req.query.token) {
+            token = req.query.token;
+        }
 
         if (!token) {
             return res.status(401).json({

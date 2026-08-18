@@ -10,6 +10,7 @@ import {
     ScrollView,
     Alert,
     Platform,
+    TextInput,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
@@ -63,6 +64,24 @@ export default function TiendaScreen({ navigation }) {
     // Order Success Modal State
     const [successModalVisible, setSuccessModalVisible] = useState(false);
     const [latestOrderCode, setLatestOrderCode] = useState('');
+    const [latestOrderId, setLatestOrderId] = useState(null);
+
+    // Métodos de Pago y Simulación
+    const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null); // null | 'tilopay' | 'sinpe' | 'efectivo'
+    
+    // Simulación Tilopay
+    const [tilopayModalVisible, setTilopayModalVisible] = useState(false);
+    const [payingWithTilopay, setPayingWithTilopay] = useState(false);
+    const [cardNumber, setCardNumber] = useState('');
+    const [cardHolder, setCardHolder] = useState('');
+    const [cardExpiry, setCardExpiry] = useState('');
+    const [cardCvv, setCardCvv] = useState('');
+
+    // Simulación SINPE Móvil
+    const [sinpeModalVisible, setSinpeModalVisible] = useState(false);
+    const [payingWithSinpe, setPayingWithSinpe] = useState(false);
+    const [sinpePhone, setSinpePhone] = useState('');
+    const [sinpeVoucher, setSinpeVoucher] = useState('');
 
     // Order Details Modal State
     const [detailsModalVisible, setDetailsModalVisible] = useState(false);
@@ -181,8 +200,8 @@ export default function TiendaScreen({ navigation }) {
         return getCartSubtotal() + getCartIva();
     };
 
-    const handleCheckout = async () => {
-        if (cart.length === 0) return;
+    const handleCheckout = async (metodo = 'efectivo', comprobante = null) => {
+        if (cart.length === 0) return false;
         setCheckoutLoading(true);
         try {
             const checkoutBody = {
@@ -191,21 +210,82 @@ export default function TiendaScreen({ navigation }) {
                     cantidad: item.cantidad,
                     precio_unitario: item.precio
                 })),
-                total: getCartTotal()
+                total: getCartTotal(),
+                metodo_pago: metodo,
+                comprobante_pago: comprobante
             };
 
             const response = await api.post('/pedidos', checkoutBody);
             if (response.data.success) {
                 setLatestOrderCode(response.data.data.codigo_retiro);
+                setLatestOrderId(response.data.data.id);
                 setCart([]);
                 setCartModalVisible(false);
                 setSuccessModalVisible(true);
+                return true;
             }
+            return false;
         } catch (err) {
             console.error('Error en checkout:', err);
             showAlert('Error al comprar', err.response?.data?.message || 'No se pudo procesar la compra.');
+            return false;
         } finally {
             setCheckoutLoading(false);
+        }
+    };
+
+    const handleTilopaySubmit = async () => {
+        if (!cardNumber.trim() || !cardHolder.trim() || !cardExpiry.trim() || !cardCvv.trim()) {
+            showAlert('Campos Requeridos', 'Por favor completa todos los campos de la tarjeta.');
+            return;
+        }
+
+        setPayingWithTilopay(true);
+        setTimeout(async () => {
+            const success = await handleCheckout('tilopay');
+            setPayingWithTilopay(false);
+            if (success) {
+                setTilopayModalVisible(false);
+                setCardNumber('');
+                setCardHolder('');
+                setCardExpiry('');
+                setCardCvv('');
+            }
+        }, 2000);
+    };
+
+    const handleSinpeSubmit = async () => {
+        if (!sinpePhone.trim() || !sinpeVoucher.trim()) {
+            showAlert('Campos Requeridos', 'Por favor completa el teléfono y el número de comprobante.');
+            return;
+        }
+
+        setPayingWithSinpe(true);
+        setTimeout(async () => {
+            const success = await handleCheckout('sinpe', sinpeVoucher);
+            setPayingWithSinpe(false);
+            if (success) {
+                setSinpeModalVisible(false);
+                setSinpePhone('');
+                setSinpeVoucher('');
+            }
+        }, 2000);
+    };
+
+    const handleDownloadInvoice = async (pedidoId) => {
+        try {
+            const token = await AsyncStorage.getItem('token');
+            const baseUrl = api.defaults.baseURL;
+            const url = `${baseUrl}/reportes/factura/${pedidoId}?token=${token}`;
+            if (Platform.OS === 'web') {
+                window.open(url, '_blank');
+            } else {
+                const { Linking } = require('react-native');
+                Linking.openURL(url);
+            }
+        } catch (err) {
+            console.error(err);
+            showAlert('Error', 'No se pudo descargar la factura.');
         }
     };
 
@@ -575,6 +655,78 @@ export default function TiendaScreen({ navigation }) {
                             </View>
                         </View>
 
+                        {/* Selección de Método de Pago */}
+                        <View style={{ marginVertical: 12, paddingHorizontal: 4 }}>
+                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#475569', marginBottom: 8 }}>Método de Pago:</Text>
+                            <View style={{ flexDirection: 'column', gap: 6 }}>
+                                <TouchableOpacity 
+                                    style={[{ 
+                                        flexDirection: 'row', 
+                                        alignItems: 'center', 
+                                        padding: 10, 
+                                        borderRadius: 8, 
+                                        borderWidth: 1, 
+                                        borderColor: '#cbd5e1', 
+                                        backgroundColor: '#fff' 
+                                    }, selectedPaymentMethod === 'tilopay' && { 
+                                        borderColor: '#0284c7', 
+                                        backgroundColor: '#f0f9ff' 
+                                    }]}
+                                    onPress={() => setSelectedPaymentMethod('tilopay')}
+                                >
+                                    <Text style={{ fontSize: 16, marginRight: 8 }}>💳</Text>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#1e293b' }}>Tilopay (Modo Prueba)</Text>
+                                        <Text style={{ fontSize: 10, color: '#64748b' }}>Paga de forma segura con tarjeta de crédito/débito</Text>
+                                    </View>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity 
+                                    style={[{ 
+                                        flexDirection: 'row', 
+                                        alignItems: 'center', 
+                                        padding: 10, 
+                                        borderRadius: 8, 
+                                        borderWidth: 1, 
+                                        borderColor: '#cbd5e1', 
+                                        backgroundColor: '#fff' 
+                                    }, selectedPaymentMethod === 'sinpe' && { 
+                                        borderColor: '#10b981', 
+                                        backgroundColor: '#f0fdf4' 
+                                    }]}
+                                    onPress={() => setSelectedPaymentMethod('sinpe')}
+                                >
+                                    <Text style={{ fontSize: 16, marginRight: 8 }}>📱</Text>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#1e293b' }}>SINPE Móvil</Text>
+                                        <Text style={{ fontSize: 10, color: '#64748b' }}>Transfiere al 8888-8888 e ingresa el comprobante</Text>
+                                    </View>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity 
+                                    style={[{ 
+                                        flexDirection: 'row', 
+                                        alignItems: 'center', 
+                                        padding: 10, 
+                                        borderRadius: 8, 
+                                        borderWidth: 1, 
+                                        borderColor: '#cbd5e1', 
+                                        backgroundColor: '#fff' 
+                                    }, selectedPaymentMethod === 'efectivo' && { 
+                                        borderColor: '#475569', 
+                                        backgroundColor: '#f8fafc' 
+                                    }]}
+                                    onPress={() => setSelectedPaymentMethod('efectivo')}
+                                >
+                                    <Text style={{ fontSize: 16, marginRight: 8 }}>💵</Text>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#1e293b' }}>Efectivo (Retiro en Clínica)</Text>
+                                        <Text style={{ fontSize: 10, color: '#64748b' }}>Paga en caja al retirar tus productos</Text>
+                                    </View>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+
                         <View style={styles.modalActionButtons}>
                             <TouchableOpacity 
                                 style={[styles.modalBtn, styles.cancelModalBtn]} 
@@ -583,14 +735,33 @@ export default function TiendaScreen({ navigation }) {
                                 <Text style={styles.cancelModalBtnText}>Continuar Comprando</Text>
                             </TouchableOpacity>
                             <TouchableOpacity 
-                                style={[styles.modalBtn, styles.saveModalBtn]} 
-                                onPress={handleCheckout}
-                                disabled={checkoutLoading}
+                                style={[
+                                    styles.modalBtn, 
+                                    styles.saveModalBtn, 
+                                    !selectedPaymentMethod && { backgroundColor: '#cbd5e1' },
+                                    selectedPaymentMethod === 'sinpe' && { backgroundColor: '#10b981' }, 
+                                    selectedPaymentMethod === 'efectivo' && { backgroundColor: '#475569' }
+                                ]} 
+                                onPress={() => {
+                                    if (selectedPaymentMethod === 'tilopay') {
+                                        setTilopayModalVisible(true);
+                                    } else if (selectedPaymentMethod === 'sinpe') {
+                                        setSinpeModalVisible(true);
+                                    } else if (selectedPaymentMethod === 'efectivo') {
+                                        handleCheckout('efectivo');
+                                    }
+                                }}
+                                disabled={checkoutLoading || !selectedPaymentMethod}
                             >
                                 {checkoutLoading ? (
                                     <ActivityIndicator color="#fff" />
                                 ) : (
-                                    <Text style={styles.saveModalBtnText}>Confirmar Pedido 🛍️</Text>
+                                    <Text style={styles.saveModalBtnText}>
+                                        {!selectedPaymentMethod && 'Seleccione Pago 🛍️'}
+                                        {selectedPaymentMethod === 'tilopay' && 'Proceder al Pago 💳'}
+                                        {selectedPaymentMethod === 'sinpe' && 'Pagar con SINPE 📱'}
+                                        {selectedPaymentMethod === 'efectivo' && 'Confirmar Pedido 🛍️'}
+                                    </Text>
                                 )}
                             </TouchableOpacity>
                         </View>
@@ -598,7 +769,7 @@ export default function TiendaScreen({ navigation }) {
                 </View>
             </Modal>
 
-            {/* Modal de Pedido Exitoso (Mensaje de Retiro) */}
+            {/* Modal de Pedido Exitoso */}
             <Modal
                 animationType="fade"
                 transparent={true}
@@ -606,32 +777,356 @@ export default function TiendaScreen({ navigation }) {
                 onRequestClose={() => setSuccessModalVisible(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { alignItems: 'center', padding: 25 }]}>
-                        <Text style={styles.successIcon}>🎉</Text>
-                        <Text style={styles.successTitle}>¡Pedido Registrado con Éxito!</Text>
-                        
-                        <Text style={styles.successDesc}>
-                            Tu pedido ha sido procesado de forma correcta. Presenta el siguiente código al retirar en la clínica veterinaria:
-                        </Text>
+                    <View style={[styles.modalContent, { alignItems: 'center', padding: 25, maxWidth: 450 }]}>
+                        {selectedPaymentMethod && selectedPaymentMethod !== 'efectivo' ? (
+                            <>
+                                <Text style={{ fontSize: 48, color: '#10b981', marginBottom: 12 }}>✓</Text>
+                                <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#065f46', textAlign: 'center', marginBottom: 6 }}>Pago realizado correctamente</Text>
+                                <Text style={{ fontSize: 12, color: '#d97706', fontWeight: 'bold', backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4, marginBottom: 15 }}>
+                                    Transacción de prueba
+                                </Text>
+                                
+                                <View style={{ width: '100%', marginBottom: 20, padding: 15, backgroundColor: '#f8fafc', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', gap: 8 }}>
+                                    <Text style={{ fontSize: 13, color: '#334155' }}>
+                                        <Text style={{ fontWeight: 'bold' }}>Número del pedido:</Text> {latestOrderCode}
+                                    </Text>
+                                    <Text style={{ fontSize: 13, color: '#334155' }}>
+                                        <Text style={{ fontWeight: 'bold' }}>Estado:</Text> <Text style={{ color: '#ea580c', fontWeight: 'bold' }}>Pendiente (Pagado)</Text>
+                                    </Text>
+                                    <Text style={{ fontSize: 13, color: '#10b981', fontWeight: 'bold', marginTop: 4 }}>
+                                        ✓ Factura generada correctamente.
+                                    </Text>
+                                </View>
 
-                        <View style={styles.codeContainer}>
-                            <Text style={styles.codeText}>{latestOrderCode}</Text>
+                                <View style={{ width: '100%', gap: 10 }}>
+                                    <TouchableOpacity 
+                                        style={{ backgroundColor: '#2563eb', borderRadius: 8, paddingVertical: 12, alignItems: 'center' }} 
+                                        onPress={() => handleDownloadInvoice(latestOrderId)}
+                                    >
+                                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Ver Factura 📄</Text>
+                                    </TouchableOpacity>
+                                    
+                                    <TouchableOpacity 
+                                        style={{ backgroundColor: '#475569', borderRadius: 8, paddingVertical: 12, alignItems: 'center' }} 
+                                        onPress={() => {
+                                            setSuccessModalVisible(false);
+                                            setActiveTab('pedidos');
+                                        }}
+                                    >
+                                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Volver a la Tienda</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </>
+                        ) : (
+                            <>
+                                <Text style={styles.successIcon}>🎉</Text>
+                                <Text style={styles.successTitle}>¡Pedido Registrado con Éxito!</Text>
+                                
+                                <Text style={styles.successDesc}>
+                                    Tu pedido ha sido procesado de forma correcta. Presenta el siguiente código al retirar en la clínica veterinaria:
+                                </Text>
+
+                                <View style={styles.codeContainer}>
+                                    <Text style={styles.codeText}>{latestOrderCode}</Text>
+                                </View>
+
+                                <Text style={styles.instructionText}>
+                                    📍 Retiro en: Clínica Veterinaria de Animales Exóticos.{"\n"}
+                                    🕒 Horario: Lunes a Viernes de 06:00 a 15:00.
+                                </Text>
+
+                                <TouchableOpacity 
+                                    style={styles.successCloseBtn} 
+                                    onPress={() => {
+                                        setSuccessModalVisible(false);
+                                        setActiveTab('pedidos');
+                                    }}
+                                >
+                                    <Text style={styles.successCloseBtnText}>Entendido</Text>
+                                </TouchableOpacity>
+                            </>
+                        )}
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Modal de Simulación de Tilopay */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={tilopayModalVisible}
+                onRequestClose={() => {
+                    if (!payingWithTilopay) setTilopayModalVisible(false);
+                }}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { maxWidth: 450 }]}>
+                        {/* Header de Tilopay */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#e2e8f0', paddingBottom: 12, marginBottom: 15 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#0ea5e9' }}>tilo</Text>
+                                <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#0284c7' }}>pay</Text>
+                                <View style={{ backgroundColor: '#e0f2fe', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                    <Text style={{ fontSize: 9, color: '#0369a1', fontWeight: 'bold' }}>ACADÉMICO</Text>
+                                </View>
+                            </View>
+                            <TouchableOpacity 
+                                onPress={() => setTilopayModalVisible(false)}
+                                disabled={payingWithTilopay}
+                                style={{ padding: 4 }}
+                            >
+                                <Text style={{ color: '#94a3b8', fontSize: 16, fontWeight: 'bold' }}>✕</Text>
+                            </TouchableOpacity>
                         </View>
 
-                        <Text style={styles.instructionText}>
-                            📍 Retiro en: Clínica Veterinaria de Animales Exóticos.{"\n"}
-                            🕒 Horario: Lunes a Viernes de 06:00 a 15:00.
-                        </Text>
+                        {payingWithTilopay ? (
+                            <View style={{ alignItems: 'center', paddingVertical: 40, gap: 16, marginVertical: 30 }}>
+                                <ActivityIndicator size="large" color="#0284c7" />
+                                <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#1e293b', textAlign: 'center' }}>
+                                    Procesando pago seguro...
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#64748b', textAlign: 'center' }}>
+                                    Por favor no cierres la aplicación ni refresques la pantalla. Conectando con los servidores académicos de Tilopay.
+                                </Text>
+                            </View>
+                        ) : (
+                            <ScrollView showsVerticalScrollIndicator={false}>
+                                {/* Alerta Sandbox */}
+                                <View style={{ backgroundColor: '#fef3c7', borderWidth: 1, borderColor: '#fde68a', borderRadius: 8, padding: 12, marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 11, color: '#b45309', fontWeight: 'bold', textAlign: 'center' }}>
+                                        ⚠️ Modo Sandbox - Simulación para fines académicos. No se realizará ningún cargo real.
+                                    </Text>
+                                </View>
 
-                        <TouchableOpacity 
-                            style={styles.successCloseBtn} 
-                            onPress={() => {
-                                setSuccessModalVisible(false);
-                                setActiveTab('pedidos');
-                            }}
-                        >
-                            <Text style={styles.successCloseBtnText}>Entendido</Text>
-                        </TouchableOpacity>
+                                {/* Tarjeta Virtual de Crédito */}
+                                <View style={{ backgroundColor: '#1e293b', borderRadius: 12, padding: 18, marginBottom: 20, elevation: 4 }}>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25 }}>
+                                        <Text style={{ color: '#fff', fontSize: 14, fontWeight: 'bold', letterSpacing: 1 }}>TARJETA VIRTUAL</Text>
+                                        <Text style={{ color: '#0ea5e9', fontSize: 16, fontWeight: 'bold', fontStyle: 'italic' }}>VISA / MC</Text>
+                                    </View>
+                                    <Text style={{ color: '#cbd5e1', fontSize: 16, letterSpacing: 2, marginBottom: 15, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
+                                        {cardNumber ? cardNumber.replace(/(\d{4})/g, '$1 ').trim() : '•••• •••• •••• ••••'}
+                                    </Text>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={{ color: '#94a3b8', fontSize: 8 }}>Titular</Text>
+                                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }} numberOfLines={1}>
+                                                {cardHolder ? cardHolder.toUpperCase() : 'NOMBRE COMPLETO'}
+                                            </Text>
+                                        </View>
+                                        <View style={{ flexDirection: 'row', gap: 15 }}>
+                                            <View>
+                                                <Text style={{ color: '#94a3b8', fontSize: 8 }}>Vence</Text>
+                                                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                                                    {cardExpiry ? cardExpiry : 'MM/AA'}
+                                                </Text>
+                                            </View>
+                                            <View>
+                                                <Text style={{ color: '#94a3b8', fontSize: 8 }}>CVV</Text>
+                                                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
+                                                    {cardCvv ? cardCvv : '•••'}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Formulario */}
+                                <View style={{ gap: 12, marginBottom: 20 }}>
+                                    <View>
+                                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 }}>Número de tarjeta</Text>
+                                        <TextInput 
+                                            style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 10, fontSize: 13, color: '#1e293b', backgroundColor: '#fff' }}
+                                            placeholder="4000 1234 5678 9010"
+                                            keyboardType="numeric"
+                                            value={cardNumber}
+                                            onChangeText={text => setCardNumber(text.replace(/[^0-9]/g, ''))}
+                                            maxLength={16}
+                                        />
+                                    </View>
+
+                                    <View>
+                                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 }}>Nombre del titular</Text>
+                                        <TextInput 
+                                            style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 10, fontSize: 13, color: '#1e293b', backgroundColor: '#fff' }}
+                                            placeholder="Ej. Juan Pérez"
+                                            autoCapitalize="words"
+                                            value={cardHolder}
+                                            onChangeText={setCardHolder}
+                                            maxLength={50}
+                                        />
+                                    </View>
+
+                                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={{ fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 }}>Vencimiento (MM/AA)</Text>
+                                            <TextInput 
+                                                style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 10, fontSize: 13, color: '#1e293b', backgroundColor: '#fff' }}
+                                                placeholder="MM/AA"
+                                                value={cardExpiry}
+                                                onChangeText={text => {
+                                                    let val = text.replace(/[^0-9]/g, '');
+                                                    if (val.length >= 2) {
+                                                        val = val.slice(0, 2) + '/' + val.slice(2, 4);
+                                                    }
+                                                    setCardExpiry(val);
+                                                }}
+                                                maxLength={5}
+                                            />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={{ fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 }}>CVV</Text>
+                                            <TextInput 
+                                                style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 10, fontSize: 13, color: '#1e293b', backgroundColor: '#fff' }}
+                                                placeholder="123"
+                                                keyboardType="numeric"
+                                                secureTextEntry={true}
+                                                value={cardCvv}
+                                                onChangeText={text => setCardCvv(text.replace(/[^0-9]/g, ''))}
+                                                maxLength={4}
+                                            />
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Desglose Final de Monto */}
+                                <View style={{ borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingTop: 12, marginBottom: 20 }}>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <Text style={{ fontSize: 13, color: '#64748b' }}>Monto total a cargar:</Text>
+                                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#0284c7' }}>
+                                            ₡{getCartTotal().toLocaleString()}
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                {/* Botones */}
+                                <View style={{ flexDirection: 'row', gap: 10 }}>
+                                    <TouchableOpacity 
+                                        style={{ flex: 1, borderWidth: 1, borderColor: '#ef4444', borderRadius: 8, paddingVertical: 12, alignItems: 'center' }} 
+                                        onPress={() => setTilopayModalVisible(false)}
+                                    >
+                                        <Text style={{ color: '#ef4444', fontWeight: 'bold', fontSize: 14 }}>Cancelar</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity 
+                                        style={{ flex: 1, backgroundColor: '#0284c7', borderRadius: 8, paddingVertical: 12, alignItems: 'center' }} 
+                                        onPress={handleTilopaySubmit}
+                                    >
+                                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Pagar</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </ScrollView>
+                        )}
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Modal de Simulación de SINPE Móvil */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={sinpeModalVisible}
+                onRequestClose={() => {
+                    if (!payingWithSinpe) setSinpeModalVisible(false);
+                }}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { maxWidth: 450 }]}>
+                        {/* Header de SINPE */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#e2e8f0', paddingBottom: 12, marginBottom: 15 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#10b981' }}>sinpe</Text>
+                                <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#059669' }}>móvil</Text>
+                                <View style={{ backgroundColor: '#d1fae5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                    <Text style={{ fontSize: 9, color: '#047857', fontWeight: 'bold' }}>SIMULACIÓN</Text>
+                                </View>
+                            </View>
+                            <TouchableOpacity 
+                                onPress={() => setSinpeModalVisible(false)}
+                                disabled={payingWithSinpe}
+                                style={{ padding: 4 }}
+                            >
+                                <Text style={{ color: '#94a3b8', fontSize: 16, fontWeight: 'bold' }}>✕</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {payingWithSinpe ? (
+                            <View style={{ alignItems: 'center', paddingVertical: 40, gap: 16, marginVertical: 30 }}>
+                                <ActivityIndicator size="large" color="#10b981" />
+                                <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#1e293b', textAlign: 'center' }}>
+                                    Validando transferencia SINPE...
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#64748b', textAlign: 'center' }}>
+                                    Por favor espera un momento mientras procesamos la referencia del comprobante.
+                                </Text>
+                            </View>
+                        ) : (
+                            <ScrollView showsVerticalScrollIndicator={false}>
+                                {/* Instrucciones de Transferencia */}
+                                <View style={{ backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#bbf7d0', borderRadius: 8, padding: 15, marginBottom: 16 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#166534', marginBottom: 4 }}>
+                                        Instrucciones de Pago:
+                                    </Text>
+                                    <Text style={{ fontSize: 12, color: '#166534', lineHeight: 18 }}>
+                                        1. Realiza la transferencia SINPE Móvil por el monto total al número:{"\n"}
+                                        👉 <Text style={{ fontWeight: 'bold', fontSize: 14 }}>8888-8888</Text> (Veterinaria Exóticos).{"\n"}
+                                        2. Registra el número de teléfono emisor y el número de comprobante a continuación para validar.
+                                    </Text>
+                                </View>
+
+                                {/* Formulario */}
+                                <View style={{ gap: 12, marginBottom: 20 }}>
+                                    <View>
+                                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 }}>Teléfono del emisor</Text>
+                                        <TextInput 
+                                            style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 10, fontSize: 13, color: '#1e293b', backgroundColor: '#fff' }}
+                                            placeholder="8888-8888"
+                                            keyboardType="phone-pad"
+                                            value={sinpePhone}
+                                            onChangeText={setSinpePhone}
+                                            maxLength={15}
+                                        />
+                                    </View>
+
+                                    <View>
+                                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 }}>Número de comprobante o referencia</Text>
+                                        <TextInput 
+                                            style={{ borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 10, fontSize: 13, color: '#1e293b', backgroundColor: '#fff' }}
+                                            placeholder="Número de referencia de la transferencia"
+                                            keyboardType="numeric"
+                                            value={sinpeVoucher}
+                                            onChangeText={setSinpeVoucher}
+                                            maxLength={30}
+                                        />
+                                    </View>
+                                </View>
+
+                                {/* Desglose Final de Monto */}
+                                <View style={{ borderTopWidth: 1, borderTopColor: '#e2e8f0', paddingTop: 12, marginBottom: 20 }}>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <Text style={{ fontSize: 13, color: '#64748b' }}>Monto total a transferir:</Text>
+                                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#10b981' }}>
+                                            ₡{getCartTotal().toLocaleString()}
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                {/* Botones */}
+                                <View style={{ flexDirection: 'row', gap: 10 }}>
+                                    <TouchableOpacity 
+                                        style={{ flex: 1, borderWidth: 1, borderColor: '#ef4444', borderRadius: 8, paddingVertical: 12, alignItems: 'center' }} 
+                                        onPress={() => setSinpeModalVisible(false)}
+                                    >
+                                        <Text style={{ color: '#ef4444', fontWeight: 'bold', fontSize: 14 }}>Cancelar</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity 
+                                        style={{ flex: 1, backgroundColor: '#10b981', borderRadius: 8, paddingVertical: 12, alignItems: 'center' }} 
+                                        onPress={handleSinpeSubmit}
+                                    >
+                                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Validar y Registrar Pedido 📱</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </ScrollView>
+                        )}
                     </View>
                 </View>
             </Modal>

@@ -47,3 +47,34 @@ export const getCurrentUser = async () => {
     const user = await AsyncStorage.getItem('user');
     return user ? JSON.parse(user) : null;
 };
+
+export const forgotPassword = async (email) => {
+    try {
+        const response = await api.post('/auth/forgot-password', { email });
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
+export const resetPassword = async (email, code, newPassword) => {
+    try {
+        const response = await api.post('/auth/reset-password', { email, code, newPassword });
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
+export const loginWithGoogle = async (idToken) => {
+    try {
+        const response = await api.post('/auth/google', { idToken });
+        if (response.data.success) {
+            await AsyncStorage.setItem('token', response.data.data.token);
+            await AsyncStorage.setItem('user', JSON.stringify(response.data.data.user));
+            return response.data;
+        }
+    } catch (error) {
+        throw error;
+    }
+};
