@@ -1,18 +1,37 @@
 const nodemailer = require('nodemailer');
 
+/**
+ * Extrae el nombre y la dirección de correo limpia
+ * Ejemplo: 'VetExóticos <mi_correo@gmail.com>' -> { name: 'VetExóticos', email: 'mi_correo@gmail.com' }
+ * Ejemplo: 'mi_correo@gmail.com' -> { name: 'VetExóticos', email: 'mi_correo@gmail.com' }
+ */
+function extractEmailAndName(input, defaultName = 'VetExóticos') {
+    if (!input || typeof input !== 'string') return { name: defaultName, email: '' };
+    const match = input.match(/^(?:(.*?)<)?([^<>]+)>?$/);
+    if (match) {
+        const name = (match[1] || '').trim().replace(/^["']|["']$/g, '');
+        const email = match[2].trim();
+        return { name: name || defaultName, email };
+    }
+    return { name: defaultName, email: input.trim() };
+}
+
 class EmailService {
     /**
-     * Envía un correo con código de verificación (para login o recuperación de contraseña)
-     * Soporta:
-     * 1. Resend API (HTTPS en puerto 443 - Recomendado para Railway y Nube)
-     * 2. Brevo API (HTTPS en puerto 443)
-     * 3. SMTP con Nodemailer (con timeout estricto de 5s para evitar bloqueos)
-     * 4. Consola (solo en entorno de desarrollo local)
+     * Envía un correo con código de verificación (para login 2FA o recuperación de contraseña)
+     * a CUALQUIER usuario registrado sin requerir un dominio propio.
+     *
+     * Proveedores soportados:
+     * 1. Brevo REST API (HTTPS en puerto 443 - Envía a CUALQUIER correo gratis, sin dominio)
+     * 2. SendGrid REST API (HTTPS en puerto 443 - Single Sender Verification)
+     * 3. Resend REST API (HTTPS en puerto 443)
+     * 4. SMTP con Nodemailer (con timeout estricto de 5s)
+     * 5. Consola (solo en desarrollo local)
      *
      * @param {Object} options
-     * @param {string} options.to - Correo del destinatario
+     * @param {string} options.to - Correo de destino del usuario
      * @param {string} options.nombre - Nombre del usuario
-     * @param {string} options.code - Código de 6 dígitos
+     * @param {string} options.code - Código numérico de 6 dígitos
      * @param {string} [options.type='login'] - 'login' o 'reset_password'
      */
     static async sendVerificationEmail({ to, nombre, code, type = 'login' }) {
@@ -50,8 +69,116 @@ class EmailService {
             </div>
         `;
 
-        // 1. INTENTO VÍA RESEND (API REST HTTPS - Puerto 443)
-        // No requiere puertos SMTP y funciona en Railway, Render, Vercel, etc.
+        // -----------------------------------------------------------------------------------
+        // OPCIÓN 1 (RECOMENDADA): BREVO API (REST HTTPS - Puerto 443)
+        // Ventajas: Gratuito (300 emails/día), SIN dominio propio (usa tu correo personal verificado),
+        // y entrega correos a CUALQUIER destinatario (Gmail, Hotmail, etc.).
+        // -----------------------------------------------------------------------------------
+        const brevoApiKey = process.env.BREVO_API_KEY;
+        if (brevoApiKey && brevoApiKey.trim() !== '') {
+            const rawSender = process.env.EMAIL_FROM || process.env.BREVO_SENDER_EMAIL || process.env.SMTP_USER;
+            const { name: senderName, email: senderEmail } = extractEmailAndName(rawSender, 'VetExóticos');
+
+            if (!senderEmail) {
+                throw new Error('Debes configurar EMAIL_FROM en Railway con el correo que verificaste en tu cuenta de Brevo (ej: tu_correo@gmail.com)');
+            }
+
+            console.log(`📧 Enviando código vía Brevo HTTPS API a ${to} (Remitente: ${senderEmail})...`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+            try {
+                const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+                    method: 'POST',
+                    headers: {
+                        'api-key': brevoApiKey.trim(),
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        sender: { name: senderName || 'VetExóticos', email: senderEmail },
+                        to: [{ email: to, name: nombre || 'Usuario' }],
+                        subject: subject,
+                        htmlContent: html
+                    }),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+                let data = {};
+                try {
+                    data = await response.json();
+                } catch {}
+
+                if (!response.ok) {
+                    const detail = data.message || `HTTP ${response.status} ${response.statusText}`;
+                    throw new Error(detail);
+                }
+
+                console.log(`✅ Correo enviado con éxito vía Brevo (ID: ${data.messageId || 'OK'})`);
+                return { success: true, provider: 'brevo', id: data.messageId };
+            } catch (err) {
+                clearTimeout(timeoutId);
+                const isTimeout = err.name === 'AbortError';
+                const msg = isTimeout ? 'Tiempo de espera agotado (7s) conectando con Brevo API' : err.message;
+                console.error(`❌ Error al enviar correo vía Brevo: ${msg}`);
+                throw new Error(`Fallo en Brevo API: ${msg}`);
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // OPCIÓN 2: SENDGRID API (REST HTTPS - Puerto 443)
+        // -----------------------------------------------------------------------------------
+        const sendgridApiKey = process.env.SENDGRID_API_KEY;
+        if (sendgridApiKey && sendgridApiKey.trim() !== '') {
+            const rawSender = process.env.EMAIL_FROM || process.env.SMTP_USER;
+            const { name: senderName, email: senderEmail } = extractEmailAndName(rawSender, 'VetExóticos');
+
+            if (!senderEmail) {
+                throw new Error('Debes configurar EMAIL_FROM con el remitente verificado en SendGrid');
+            }
+
+            console.log(`📧 Enviando código vía SendGrid HTTPS API a ${to}...`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+            try {
+                const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${sendgridApiKey.trim()}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        personalizations: [{ to: [{ email: to, name: nombre || 'Usuario' }] }],
+                        from: { email: senderEmail, name: senderName || 'VetExóticos' },
+                        subject: subject,
+                        content: [{ type: 'text/html', value: html }]
+                    }),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`SendGrid HTTP ${response.status}: ${errorText}`);
+                }
+
+                console.log(`✅ Correo enviado con éxito vía SendGrid`);
+                return { success: true, provider: 'sendgrid' };
+            } catch (err) {
+                clearTimeout(timeoutId);
+                const isTimeout = err.name === 'AbortError';
+                const msg = isTimeout ? 'Tiempo de espera agotado (7s) conectando con SendGrid' : err.message;
+                console.error(`❌ Error al enviar correo vía SendGrid: ${msg}`);
+                throw new Error(`Fallo en SendGrid API: ${msg}`);
+            }
+        }
+
+        // -----------------------------------------------------------------------------------
+        // OPCIÓN 3: RESEND API (REST HTTPS - Puerto 443)
+        // -----------------------------------------------------------------------------------
         const resendApiKey = process.env.RESEND_API_KEY;
         if (resendApiKey && resendApiKey.trim() !== '') {
             console.log(`📧 Enviando código vía Resend HTTPS API a ${to}...`);
@@ -94,48 +221,9 @@ class EmailService {
             }
         }
 
-        // 2. INTENTO VÍA BREVO API (HTTPS - Puerto 443)
-        const brevoApiKey = process.env.BREVO_API_KEY;
-        if (brevoApiKey && brevoApiKey.trim() !== '') {
-            console.log(`📧 Enviando código vía Brevo HTTPS API a ${to}...`);
-            const senderEmail = process.env.EMAIL_FROM || 'no-reply@clinica-exoticos.com';
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 7000);
-
-            try {
-                const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-                    method: 'POST',
-                    headers: {
-                        'api-key': brevoApiKey.trim(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        sender: { name: 'VetExóticos', email: senderEmail },
-                        to: [{ email: to, name: nombre || 'Usuario' }],
-                        subject: subject,
-                        htmlContent: html
-                    }),
-                    signal: controller.signal
-                });
-
-                clearTimeout(timeoutId);
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data.message || `Brevo error HTTP ${response.status}`);
-                }
-
-                console.log(`✅ Correo enviado con éxito vía Brevo (ID: ${data.messageId})`);
-                return { success: true, provider: 'brevo', id: data.messageId };
-            } catch (err) {
-                clearTimeout(timeoutId);
-                const isTimeout = err.name === 'AbortError';
-                const msg = isTimeout ? 'Tiempo de espera agotado (7s) conectando con Brevo API' : err.message;
-                console.error(`❌ Error al enviar correo vía Brevo: ${msg}`);
-                throw new Error(`Fallo en Brevo API: ${msg}`);
-            }
-        }
-
-        // 3. INTENTO VÍA SMTP (Nodemailer con timeout estricto)
+        // -----------------------------------------------------------------------------------
+        // OPCIÓN 4: SMTP CON NODEMAILER (Con timeout estricto de 5 segundos)
+        // -----------------------------------------------------------------------------------
         const smtpUser = process.env.SMTP_USER;
         const smtpPass = process.env.SMTP_PASS;
         const isConfiguredSmtp = smtpUser && smtpPass && smtpUser !== 'tu_correo@gmail.com' && smtpPass !== 'tu_password';
@@ -170,14 +258,18 @@ class EmailService {
             }
         }
 
-        // 4. SI ESTAMOS EN PRODUCCIÓN Y NINGÚN PROVEEDOR ESTÁ CONFIGURADO
+        // -----------------------------------------------------------------------------------
+        // SI ESTAMOS EN PRODUCCIÓN Y NINGÚN PROVEEDOR ESTÁ CONFIGURADO
+        // -----------------------------------------------------------------------------------
         if (process.env.NODE_ENV === 'production') {
-            const errorMsg = 'El servicio de correo no está configurado en producción. Por favor configura RESEND_API_KEY en las variables de entorno de Railway.';
+            const errorMsg = 'El servicio de correo no está configurado en producción. Para enviar códigos a cualquier usuario sin necesidad de dominio propio, agrega las variables BREVO_API_KEY y EMAIL_FROM en Railway.';
             console.error(`🛑 ${errorMsg}`);
             throw new Error(errorMsg);
         }
 
-        // 5. MODO DESARROLLO LOCAL (Si no hay credenciales configuradas)
+        // -----------------------------------------------------------------------------------
+        // MODO DESARROLLO LOCAL (Si no hay credenciales configuradas)
+        // -----------------------------------------------------------------------------------
         console.log('--------------------------------------------------');
         console.log('📢 [MODO DESARROLLO] Código de verificación generado:');
         console.log(`🔑 CÓDIGO: ${code}`);
