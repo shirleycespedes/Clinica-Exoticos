@@ -5,7 +5,7 @@
 
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
+const EmailService = require('../services/emailService');
 const { OAuth2Client } = require('google-auth-library');
 const Usuario = require('../models/Usuario');
 const Propietario = require('../models/Propietario');
@@ -183,77 +183,21 @@ class AuthController {
                 [code, expires, user.id]
             );
 
-            // Configurar nodemailer
-            let transporter;
-            let usingEthereal = false;
-            let testAccount = null;
-
-            if (!process.env.SMTP_USER || !process.env.SMTP_PASS || process.env.SMTP_USER === 'tu_correo@gmail.com') {
-                console.log('⚠️ SMTP credentials not configured in backend/.env. Using Ethereal/Console fallback...');
-                try {
-                    testAccount = await nodemailer.createTestAccount();
-                    transporter = nodemailer.createTransport({
-                        host: 'smtp.ethereal.email',
-                        port: 587,
-                        secure: false,
-                        auth: {
-                            user: testAccount.user,
-                            pass: testAccount.pass
-                        }
-                    });
-                    usingEthereal = true;
-                } catch (etherealError) {
-                    console.warn('⚠️ Failed to generate Ethereal test account, code will only print in console.', etherealError.message);
-                }
-            } else {
-                transporter = nodemailer.createTransport({
-                    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-                    port: parseInt(process.env.SMTP_PORT || '465'),
-                    secure: process.env.SMTP_PORT === '465',
-                    auth: {
-                        user: process.env.SMTP_USER,
-                        pass: process.env.SMTP_PASS
-                    }
+            // Enviar email de confirmación de identidad (2FA) mediante EmailService
+            try {
+                await EmailService.sendVerificationEmail({
+                    to: user.email,
+                    nombre: user.nombre,
+                    code,
+                    type: 'login'
                 });
-            }
-
-            // Enviar email de confirmación de identidad
-            const mailOptions = {
-                from: usingEthereal ? `"VetExóticos Test" <${testAccount.user}>` : `"VetExóticos" <${process.env.SMTP_USER}>`,
-                to: user.email,
-                subject: 'Código de verificación de identidad - VetExóticos',
-                html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-                        <h2 style="color: #2563eb; text-align: center;">🦎 VetExóticos</h2>
-                        <p>Hola <strong>${user.nombre}</strong>,</p>
-                        <p>Recibimos un intento de inicio de sesión en tu cuenta. Utiliza el siguiente código para confirmar tu identidad e ingresar a la aplicación:</p>
-                        <div style="text-align: center; margin: 30px 0;">
-                            <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #2563eb; background-color: #f3f4f6; padding: 10px 20px; border-radius: 6px; border: 1px dashed #2563eb;">${code}</span>
-                        </div>
-                        <p style="color: #ef4444; font-size: 14px;"><strong>Nota:</strong> Este código expira en 15 minutos por razones de seguridad.</p>
-                        <hr style="border: 0; border-top: 1px solid #e0e0e0; margin: 20px 0;" />
-                        <p style="font-size: 12px; color: #666; text-align: center;">Si no intentaste iniciar sesión, te recomendamos cambiar tu contraseña de inmediato.</p>
-                    </div>
-                `
-            };
-
-            if (transporter) {
-                const info = await transporter.sendMail(mailOptions);
-                if (usingEthereal) {
-                    const previewUrl = nodemailer.getTestMessageUrl(info);
-                    console.log('--------------------------------------------------');
-                    console.log('📢 MODO PRUEBA: Correo de verificación de identidad enviado (Ethereal)');
-                    console.log(`🔑 CÓDIGO GENERADO: ${code}`);
-                    console.log(`📧 Destinatario: ${user.email}`);
-                    console.log(`🔗 Ver correo en navegador: ${previewUrl}`);
-                    console.log('--------------------------------------------------');
-                }
-            } else {
-                console.log('--------------------------------------------------');
-                console.log('📢 MODO PRUEBA: Correo de verificación de identidad generado (Consola)');
-                console.log(`🔑 CÓDIGO GENERADO: ${code}`);
-                console.log(`📧 Destinatario: ${user.email}`);
-                console.log('--------------------------------------------------');
+            } catch (emailError) {
+                console.error('Error al enviar correo de verificación:', emailError.message);
+                return res.status(503).json({
+                    success: false,
+                    message: 'No se pudo enviar el código de verificación a tu correo. Por favor verifica la configuración del servicio de correo o intenta más tarde.',
+                    error: emailError.message
+                });
             }
 
             res.status(200).json({
@@ -298,8 +242,9 @@ class AuthController {
                 });
             }
 
-            // Verificar si el código coincide (o es el master override '123456' para pruebas)
-            if (code !== '123456' && (!user.reset_code || user.reset_code !== code)) {
+            // Verificar si el código coincide (en desarrollo se permite 123456 como override de pruebas)
+            const isDevOverride = process.env.NODE_ENV !== 'production' && code === '123456';
+            if (!isDevOverride && (!user.reset_code || user.reset_code !== code)) {
                 return res.status(400).json({
                     success: false,
                     message: 'El código de verificación es incorrecto'
@@ -307,7 +252,7 @@ class AuthController {
             }
 
             // Verificar expiración
-            if (code !== '123456') {
+            if (!isDevOverride) {
                 const expireDate = new Date(user.reset_expires);
                 if (!user.reset_expires || expireDate < new Date()) {
                     return res.status(400).json({
@@ -749,81 +694,21 @@ class AuthController {
                 [code, expires, user.id]
             );
 
-            // Configurar nodemailer
-            let transporter;
-            let usingEthereal = false;
-            let testAccount = null;
-
-            if (!process.env.SMTP_USER || !process.env.SMTP_PASS || process.env.SMTP_USER === 'tu_correo@gmail.com') {
-                console.log('⚠️ SMTP credentials not configured in backend/.env. Using Ethereal/Console fallback...');
-                try {
-                    testAccount = await nodemailer.createTestAccount();
-                    transporter = nodemailer.createTransport({
-                        host: 'smtp.ethereal.email',
-                        port: 587,
-                        secure: false,
-                        auth: {
-                            user: testAccount.user,
-                            pass: testAccount.pass
-                        }
-                    });
-                    usingEthereal = true;
-                } catch (etherealError) {
-                    console.warn('⚠️ Failed to generate Ethereal test account, code will only print in console.', etherealError.message);
-                }
-            } else {
-                transporter = nodemailer.createTransport({
-                    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-                    port: parseInt(process.env.SMTP_PORT || '465'),
-                    secure: process.env.SMTP_PORT === '465',
-                    auth: {
-                        user: process.env.SMTP_USER,
-                        pass: process.env.SMTP_PASS
-                    }
+            // Enviar email de recuperación mediante EmailService
+            try {
+                await EmailService.sendVerificationEmail({
+                    to: email,
+                    nombre: user.nombre,
+                    code,
+                    type: 'reset_password'
                 });
-            }
-
-            // Enviar email
-            const mailOptions = {
-                from: usingEthereal ? `"VetExóticos Test" <${testAccount.user}>` : `"VetExóticos" <${process.env.SMTP_USER}>`,
-                to: email,
-                subject: 'Código de recuperación de contraseña - VetExóticos',
-                html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-                        <h2 style="color: #2563eb; text-align: center;">🦎 VetExóticos</h2>
-                        <p>Hola <strong>${user.nombre}</strong>,</p>
-                        <p>Recibimos una solicitud para restablecer tu contraseña. Utiliza el siguiente código para proceder con el restablecimiento de tu contraseña en la aplicación móvil:</p>
-                        <div style="text-align: center; margin: 30px 0;">
-                            <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #2563eb; background-color: #f3f4f6; padding: 10px 20px; border-radius: 6px; border: 1px dashed #2563eb;">${code}</span>
-                        </div>
-                        <p style="color: #ef4444; font-size: 14px;"><strong>Nota:</strong> Este código expira en 15 minutos por razones de seguridad.</p>
-                        <hr style="border: 0; border-top: 1px solid #e0e0e0; margin: 20px 0;" />
-                        <p style="font-size: 12px; color: #666; text-align: center;">Si no solicitaste este cambio, puedes ignorar este correo de forma segura. Tu contraseña actual no se modificará.</p>
-                    </div>
-                `
-            };
-
-            let responseMsg = 'Código de recuperación enviado con éxito al correo registrado';
-
-            if (transporter) {
-                const info = await transporter.sendMail(mailOptions);
-                if (usingEthereal) {
-                    const previewUrl = nodemailer.getTestMessageUrl(info);
-                    console.log('--------------------------------------------------');
-                    console.log('📢 MODO PRUEBA: Correo de recuperación enviado (Ethereal)');
-                    console.log(`🔑 CÓDIGO GENERADO: ${code}`);
-                    console.log(`📧 Destinatario: ${email}`);
-                    console.log(`🔗 Ver correo en navegador: ${previewUrl}`);
-                    console.log('--------------------------------------------------');
-                    responseMsg = `[MODO PRUEBA] Código: ${code}. (Revisa la consola del backend o abre el email en Ethereal)`;
-                }
-            } else {
-                console.log('--------------------------------------------------');
-                console.log('📢 MODO PRUEBA: Correo de recuperación generado (Consola)');
-                console.log(`🔑 CÓDIGO GENERADO: ${code}`);
-                console.log(`📧 Destinatario: ${email}`);
-                console.log('--------------------------------------------------');
-                responseMsg = `[MODO PRUEBA] Código: ${code}. (Imprimido en consola)`;
+            } catch (emailError) {
+                console.error('Error al enviar código de recuperación:', emailError.message);
+                return res.status(503).json({
+                    success: false,
+                    message: 'No se pudo enviar el correo de recuperación. Por favor verifica la configuración de correo o intenta más tarde.',
+                    error: emailError.message
+                });
             }
 
             res.status(200).json({

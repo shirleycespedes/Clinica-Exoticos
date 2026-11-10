@@ -60,6 +60,7 @@ export default function ForgotPasswordScreen({ navigation }) {
             console.error('Error al enviar código:', error);
             setGeneralError(
                 error.response?.data?.message || 
+                error.userMessage ||
                 error.message || 
                 'Error al enviar el código de recuperación.'
             );

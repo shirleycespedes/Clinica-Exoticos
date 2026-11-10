@@ -15,6 +15,7 @@ const getBaseURL = () => {
 
 const api = axios.create({
     baseURL: getBaseURL(),
+    timeout: 15000, // 15 segundos de tiempo de espera para evitar bloqueos indefinidos
     headers: {
         'Content-Type': 'application/json',
     },
@@ -51,11 +52,15 @@ api.interceptors.request.use(
     }
 );
 
-// Interceptor para manejo global de respuestas (ej. token expirado o sesión inválida)
+// Interceptor para manejo global de respuestas y tiempos de espera
 api.interceptors.response.use(
     (response) => response,
     async (error) => {
-        if (error.response && error.response.status === 401) {
+        if (error.code === 'ECONNABORTED' || error.message?.toLowerCase().includes('timeout')) {
+            error.userMessage = 'El servidor tardó demasiado en responder (tiempo de espera agotado). Por favor verifica tu conexión o intenta nuevamente.';
+        } else if (!error.response) {
+            error.userMessage = 'No se pudo conectar con el servidor en la nube. Verifica tu conexión a internet o el estado de Railway.';
+        } else if (error.response.status === 401) {
             console.warn('⚠️ Sesión expirada o no autorizada (401) en:', error.config?.url);
         }
         return Promise.reject(error);

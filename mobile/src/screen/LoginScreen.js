@@ -115,6 +115,7 @@ export default function LoginScreen({ route, navigation }) {
             } else {
                 setGeneralError(
                     error.response?.data?.message || 
+                    error.userMessage ||
                     error.message || 
                     'Error al iniciar sesión'
                 );
@@ -151,6 +152,7 @@ export default function LoginScreen({ route, navigation }) {
             } else {
                 setGeneralError(
                     error.response?.data?.message ||
+                    error.userMessage ||
                     error.message ||
                     'Error al verificar el código de identidad.'
                 );
