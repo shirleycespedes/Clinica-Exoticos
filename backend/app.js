@@ -176,6 +176,34 @@ const initializeApp = async () => {
             console.error('❌ No se pudo conectar a la base de datos');
             console.log('💡 Asegúrate de que MySQL esté ejecutándose y las credenciales sean correctas');
             console.log('💡 Revisa el archivo .env para la configuración de la base de datos');
+        } else {
+            // Asegurar esquema de notificaciones y push_token en producción/Railway
+            try {
+                const { pool } = require('./src/config/database');
+                const [columns] = await pool.query('SHOW COLUMNS FROM usuarios');
+                const hasPushToken = columns.some(c => c.Field === 'push_token');
+                if (!hasPushToken) {
+                    await pool.query('ALTER TABLE usuarios ADD COLUMN push_token VARCHAR(255) NULL');
+                    console.log('✅ Columna push_token agregada a usuarios');
+                }
+
+                await pool.query(`
+                    CREATE TABLE IF NOT EXISTS notificaciones (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        usuario_id INT NOT NULL,
+                        titulo VARCHAR(255) NOT NULL,
+                        mensaje TEXT NOT NULL,
+                        tipo VARCHAR(50) NOT NULL,
+                        leida TINYINT(1) DEFAULT 0,
+                        data JSON NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                `);
+                console.log('✅ Tabla notificaciones verificada en MySQL');
+            } catch (schemaErr) {
+                console.warn('⚠️ Error al verificar esquema de notificaciones:', schemaErr.message);
+            }
         }
 
         const server = app.listen(PORT, () => {

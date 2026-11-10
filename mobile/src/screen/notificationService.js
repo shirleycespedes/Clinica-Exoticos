@@ -38,6 +38,22 @@ export function displaySystemNotification(title, body, data = {}) {
             } catch (err) {
                 console.warn('[Web Push] Error mostrando notificación de navegador:', err);
             }
+        } else if (window.Notification.permission !== 'denied') {
+            try {
+                window.Notification.requestPermission().then((perm) => {
+                    if (perm === 'granted') {
+                        try {
+                            new window.Notification(title, {
+                                body,
+                                icon: '/favicon.png',
+                                data
+                            });
+                        } catch (e) {}
+                    }
+                });
+            } catch (permErr) {
+                console.warn('[Web Push] Error solicitando permiso:', permErr);
+            }
         }
     } else if (Platform.OS !== 'web') {
         try {
@@ -64,28 +80,28 @@ export async function registerForPushNotificationsAsync() {
     let token = null;
 
     // En web: registrar un token real de Firebase Cloud Messaging
-    if (
-        Platform.OS === 'web' &&
-        typeof window !== 'undefined' &&
-        'Notification' in window
-    ) {
-        try {
-            const { registerWebPush } = await import('../../firebaseWebPush');
-
-            token = await registerWebPush(displaySystemNotification);
-
-            if (token) {
-                await sendPushTokenToBackend(token);
-                console.log('[Push Web] Token real de Firebase obtenido.');
+    if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && 'Notification' in window) {
+            try {
+                const { registerWebPush } = await import('../../firebaseWebPush');
+                token = await registerWebPush(displaySystemNotification);
+                if (token) {
+                    await sendPushTokenToBackend(token);
+                    console.log('[Push Web] Token real de Firebase registrado.');
+                    return token;
+                }
+            } catch (webErr) {
+                console.warn('[Push Web] Aviso al registrar Firebase Web Push:', webErr.message);
             }
-        } catch (webErr) {
-            console.error('[Push Web] Error al registrar Firebase:', webErr);
         }
 
-        return token;
-    }
+        // Respaldo Web: Generar token web para que el backend reconozca la sesión del navegador
+        try {
+            const browserToken = 'web-browser-' + Math.random().toString(36).substring(2, 12);
+            await sendPushTokenToBackend(browserToken);
+            return browserToken;
+        } catch (e) {}
 
-    if (Platform.OS === 'web') {
         return null;
     }
 

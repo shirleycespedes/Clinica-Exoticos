@@ -15,7 +15,8 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# Firebase credenciales privadas
+# Firebase
+.firebase/
 *firebase-service-account.json
 !firebase-service-account.json.example
 *google-services.json

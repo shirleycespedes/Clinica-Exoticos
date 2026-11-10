@@ -66,7 +66,7 @@ export default function DashboardScreen({ navigation }) {
 
         const interval = setInterval(() => {
             if (isMounted) loadNotificaciones();
-        }, 10000);
+        }, 5000);
 
         return () => {
             isMounted = false;

@@ -17,6 +17,7 @@ import PerfilScreen from './src/screen/PerfilScreen';
 import UsuariosScreen from './src/screen/UsuariosScreen';
 import TiendaScreen from './src/screen/TiendaScreen';
 import InventarioScreen from './src/screen/InventarioScreen';
+import NotificationBanner from './src/screen/NotificationBanner';
 
 // Inject CSS style for Web to use single window scrollbar and remove height/overflow locks
 if (Platform.OS === 'web') {
@@ -54,6 +55,7 @@ export default function App() {
 
     return (
         <NavigationContainer ref={navigationRef}>
+            <NotificationBanner navigationRef={navigationRef} />
             <Stack.Navigator initialRouteName="Login">
                 <Stack.Screen 
                     name="Login" 

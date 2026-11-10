@@ -21,7 +21,14 @@ try {
 
     let serviceAccount = null;
 
-    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+        try {
+            const raw = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64.trim(), 'base64').toString('utf8');
+            serviceAccount = JSON.parse(raw);
+        } catch (e) {
+            console.warn('Error al parsear FIREBASE_SERVICE_ACCOUNT_BASE64:', e.message);
+        }
+    } else if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
         try {
             serviceAccount = typeof process.env.FIREBASE_SERVICE_ACCOUNT_JSON === 'object'
                 ? process.env.FIREBASE_SERVICE_ACCOUNT_JSON
