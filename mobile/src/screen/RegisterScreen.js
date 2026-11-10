@@ -160,16 +160,16 @@ export default function RegisterScreen({ navigation }) {
 
             if (response?.requireVerification) {
                 setRegisteredEmail(email.trim());
-                setStep(2);
                 setCode('');
+                setStep(2);
                 setResendCooldown(30);
                 if (Platform.OS === 'web') {
-                    alert('¡Código enviado! Revisa tu correo electrónico para completar el registro.');
+                    alert('Se ha enviado un código de verificación a tu correo electrónico para confirmar tu identidad.');
                 } else {
                     Alert.alert(
-                        'Código de Verificación Enviado',
-                        'Hemos enviado un código numérico de 6 dígitos a tu correo electrónico para completar tu registro.',
-                        [{ text: 'Entendido' }]
+                        'Código Enviado',
+                        'Se ha enviado un código de verificación a tu correo electrónico para confirmar tu identidad.',
+                        [{ text: 'OK' }]
                     );
                 }
             } else {
@@ -281,13 +281,13 @@ export default function RegisterScreen({ navigation }) {
                 keyboardShouldPersistTaps="handled"
             >
                 <View style={styles.content}>
-                    <Text style={styles.title}>🦎 {step === 1 ? 'Registro' : 'VetExóticos'}</Text>
+                    <Text style={styles.title}>🦎 VetExóticos</Text>
                     <Text style={styles.subtitle}>
                         {step === 1 
                             ? (currentUser && currentUser.rol === 'admin' 
                                 ? 'Registrar nuevo usuario desde Admin' 
                                 : 'Crea tu cuenta en VetExóticos')
-                            : 'Verificación de Cuenta'}
+                            : 'Confirmar Identidad'}
                     </Text>
 
                     <View style={styles.form}>
@@ -439,23 +439,22 @@ export default function RegisterScreen({ navigation }) {
                             </View>
                         ) : (
                             <View>
-                                <Text style={styles.verifyHelperText}>
-                                    Hemos enviado un código de verificación de 6 dígitos a{' '}
-                                    <Text style={styles.emailHighlight}>{registeredEmail || email}</Text>.
-                                    {'\n'}Ingrésalo a continuación para activar tu cuenta e ingresar a la aplicación:
+                                <Text style={styles.instructions}>
+                                    Hemos enviado un código de 6 dígitos a <Text style={{ fontWeight: 'bold' }}>{registeredEmail || email}</Text>. Ingresa el código para confirmar tu identidad y completar tu registro.
                                 </Text>
 
-                                <Text style={styles.label}>Código de Verificación (6 dígitos) *</Text>
+                                <Text style={styles.label}>Código de Verificación</Text>
                                 <TextInput
-                                    style={[styles.input, styles.codeInput, codeError ? styles.inputError : null]}
-                                    placeholder="000000"
+                                    style={[styles.input, codeError ? styles.inputError : null]}
+                                    placeholder="123456"
                                     value={code}
-                                    onChangeText={text => {
-                                        setCode(text.replace(/[^0-9]/g, ''));
-                                        setCodeError('');
-                                    }}
+                                    onChangeText={text => { setCode(text); setCodeError(''); }}
                                     keyboardType="number-pad"
                                     maxLength={6}
+                                    editable={!loading}
+                                    autoComplete="one-time-code"
+                                    textContentType="oneTimeCode"
+                                    importantForAutofill="no"
                                     autoFocus
                                 />
                                 {codeError ? <Text style={styles.errorText}>{codeError}</Text> : null}
@@ -468,7 +467,7 @@ export default function RegisterScreen({ navigation }) {
                                     {loading ? (
                                         <ActivityIndicator color="#fff" />
                                     ) : (
-                                        <Text style={styles.buttonText}>Verificar y Completar Registro</Text>
+                                        <Text style={styles.buttonText}>Confirmar Identidad</Text>
                                     )}
                                 </TouchableOpacity>
 
@@ -478,8 +477,8 @@ export default function RegisterScreen({ navigation }) {
                                         onPress={handleResendCode}
                                         disabled={loading || resendCooldown > 0}
                                     >
-                                        <Text style={[styles.linkText, resendCooldown > 0 && styles.linkTextDisabled]}>
-                                            {resendCooldown > 0 ? `Reenviar en ${resendCooldown}s` : '🔄 Reenviar código'}
+                                        <Text style={[styles.linkText, (loading || resendCooldown > 0) && styles.linkTextDisabled]}>
+                                            {resendCooldown > 0 ? `Reenviar en ${resendCooldown}s` : 'Reenviar código'}
                                         </Text>
                                     </TouchableOpacity>
 
@@ -493,7 +492,7 @@ export default function RegisterScreen({ navigation }) {
                                         }}
                                         disabled={loading}
                                     >
-                                        <Text style={styles.linkText}>← Corregir datos</Text>
+                                        <Text style={styles.linkText}>Cambiar cuenta</Text>
                                     </TouchableOpacity>
                                 </View>
                             </View>
@@ -564,6 +563,13 @@ const styles = StyleSheet.create({
     inputError: {
         borderColor: '#ef4444',
         backgroundColor: '#fef2f2',
+    },
+    instructions: {
+        fontSize: 14,
+        color: '#555',
+        textAlign: 'center',
+        marginBottom: 20,
+        lineHeight: 20,
     },
     codeInput: {
         textAlign: 'center',
