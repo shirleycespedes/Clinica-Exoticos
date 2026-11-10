@@ -1,42 +1,16 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform, NativeModules } from 'react-native';
 
-// URL de la API en la nube (cuando esté desplegada en Railway, Render, etc.)
-// Si se coloca la URL aquí o en EXPO_PUBLIC_API_URL, la app usará la nube tanto en celular como en web
-const CLOUD_API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+// URL base de producción en Railway (en la nube)
+const RAILWAY_API_URL = 'https://clinica-exoticos-production.up.railway.app/api/v1';
 
-// IP de respaldo por si falla la detección dinámica en desarrollo local
-const FALLBACK_IP = '192.168.0.90';
-
-// Detecta dinámicamente la IP o usa la nube
+// URL base definitiva para la aplicación móvil y web
 const getBaseURL = () => {
-    // 0. Si hay una URL en la nube configurada, usarla prioritariamente
-    if (CLOUD_API_URL && CLOUD_API_URL.trim() !== '') {
-        return CLOUD_API_URL.trim();
+    const envUrl = process.env.EXPO_PUBLIC_API_URL;
+    if (envUrl && envUrl.trim() !== '') {
+        return envUrl.trim().replace(/\/+$/, '');
     }
-
-    // 1. En la web (navegador), usar el hostname de la barra de direcciones
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
-        return `http://${window.location.hostname}:3000/api/v1`;
-    }
-
-    // 2. En celular/emulador, obtener la IP dinámica del servidor de desarrollo de Metro
-    try {
-        const scriptURL = NativeModules?.SourceCode?.scriptURL;
-        if (scriptURL) {
-            const match = scriptURL.match(/http:\/\/([^:]+):/);
-            if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
-                console.log('IP de servidor de desarrollo autodetectada:', match[1]);
-                return `http://${match[1]}:3000/api/v1`;
-            }
-        }
-    } catch (err) {
-        console.warn('Error al autodetectar IP del servidor de desarrollo:', err);
-    }
-
-    // 3. Fallback de respaldo
-    return `http://${FALLBACK_IP}:3000/api/v1`;
+    return RAILWAY_API_URL;
 };
 
 const api = axios.create({
@@ -46,20 +20,44 @@ const api = axios.create({
     },
 });
 
-// Interceptor para inyectar automáticamente el token JWT en todas las peticiones
+// Interceptor para solicitudes HTTP:
+// 1. Evita duplicación de prefijo /api/v1 en config.url
+// 2. Inyecta automáticamente el token JWT Bearer en todas las peticiones autenticadas
 api.interceptors.request.use(
     async (config) => {
         try {
+            // Protección contra duplicación de /api/v1
+            if (config.url) {
+                if (config.url.startsWith('/api/v1/')) {
+                    config.url = config.url.replace('/api/v1', '');
+                } else if (config.url.startsWith('api/v1/')) {
+                    config.url = config.url.replace('api/v1', '');
+                }
+            }
+
+            // Inyección del token de autenticación
             const token = await AsyncStorage.getItem('token');
             if (token) {
+                config.headers = config.headers || {};
                 config.headers.Authorization = `Bearer ${token}`;
             }
         } catch (error) {
-            console.error('Error al recuperar el token para la petición:', error);
+            console.error('Error al configurar headers de petición api:', error);
         }
         return config;
     },
     (error) => {
+        return Promise.reject(error);
+    }
+);
+
+// Interceptor para manejo global de respuestas (ej. token expirado o sesión inválida)
+api.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+        if (error.response && error.response.status === 401) {
+            console.warn('⚠️ Sesión expirada o no autorizada (401) en:', error.config?.url);
+        }
         return Promise.reject(error);
     }
 );

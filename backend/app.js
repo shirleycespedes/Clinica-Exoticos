@@ -75,8 +75,8 @@ app.get('/', (req, res) => {
     });
 });
 
-// Ruta de health check para monitoreo
-app.get('/health', async (req, res) => {
+// Ruta de health check para monitoreo (tanto en /health como en /api/v1/health)
+app.get(['/health', `${API_PREFIX}/health`], async (req, res) => {
     try {
         const dbConnected = await testConnection();
         res.status(200).json({
