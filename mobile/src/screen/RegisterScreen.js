@@ -145,38 +145,20 @@ export default function RegisterScreen({ navigation }) {
         try {
             const response = await register(nombre.trim(), email.trim(), password, telefono.trim() || undefined, rol);
             
-            if (rol === 'admin' && currentUser?.rol === 'admin') {
-                await displaySystemNotification(
-                    '🛡️ Nuevo Administrador Registrado',
-                    `Se ha otorgado acceso administrativo a ${nombre.trim()} (${email.trim()}).`,
-                    { screen: 'Usuarios' }
-                );
-                setSuccessMessage('¡Administrador registrado correctamente!');
-                setTimeout(() => {
-                    navigation.replace('Usuarios');
-                }, 1500);
-                return;
-            }
+            // Siempre pedir confirmación de identidad con código de 6 dígitos en el registro (igual que login)
+            setRegisteredEmail(email.trim());
+            setCode('');
+            setStep(2);
+            setResendCooldown(30);
 
-            if (response?.requireVerification) {
-                setRegisteredEmail(email.trim());
-                setCode('');
-                setStep(2);
-                setResendCooldown(30);
-                if (Platform.OS === 'web') {
-                    alert('Se ha enviado un código de verificación a tu correo electrónico para confirmar tu identidad.');
-                } else {
-                    Alert.alert(
-                        'Código Enviado',
-                        'Se ha enviado un código de verificación a tu correo electrónico para confirmar tu identidad.',
-                        [{ text: 'OK' }]
-                    );
-                }
+            if (Platform.OS === 'web') {
+                alert('Se ha enviado un código de verificación a tu correo electrónico para confirmar tu identidad.');
             } else {
-                setSuccessMessage('¡Registro completado con éxito!');
-                setTimeout(() => {
-                    navigation.replace('Dashboard');
-                }, 1500);
+                Alert.alert(
+                    'Código Enviado',
+                    'Se ha enviado un código de verificación a tu correo electrónico para confirmar tu identidad.',
+                    [{ text: 'OK' }]
+                );
             }
         } catch (error) {
             console.error('Error en el registro:', error);

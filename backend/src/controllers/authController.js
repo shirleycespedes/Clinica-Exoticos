@@ -207,19 +207,7 @@ class AuthController {
             }
 
 
-            // Si es un administrador creado desde el panel administrativo por otro admin
-            if (finalRol === 'admin') {
-                return res.status(201).json({
-                    success: true,
-                    requireVerification: false,
-                    message: 'Administrador registrado con éxito.',
-                    data: {
-                        user: newUser
-                    }
-                });
-            }
-
-            // Para clientes (registro regular): Generar código de verificación de 6 dígitos
+            // Generar código numérico de 6 dígitos para verificación de identidad (igual que en login)
             const code = Math.floor(100000 + Math.random() * 900000).toString();
             const expires = new Date(Date.now() + 15 * 60 * 1000);
 
