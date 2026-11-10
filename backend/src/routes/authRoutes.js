@@ -1,6 +1,6 @@
 /**
  * Rutas de Autenticación
- * @description Define todas las rutas para autenticación (registro, login, perfil)
+ * @description Define todas las rutas para autenticación (registro, login, perfil, push notifications)
  */
 
 const express = require('express');
@@ -11,7 +11,8 @@ const {
     validateRegister, 
     validateLogin,
     validateForgotPassword,
-    validateResetPassword
+    validateResetPassword,
+    validateVerifyLogin
 } = require('../middleware/validation');
 
 /**
@@ -23,10 +24,17 @@ router.post('/register', validateRegister, AuthController.register);
 
 /**
  * @route POST /auth/login
- * @description Autentica un usuario existente
+ * @description Autentica las credenciales de un usuario y envía código de verificación por correo
  * @access Public
  */
 router.post('/login', validateLogin, AuthController.login);
+
+/**
+ * @route POST /auth/verify-login
+ * @description Verifica el código de confirmación de identidad enviado por correo en el login
+ * @access Public
+ */
+router.post('/verify-login', validateVerifyLogin, AuthController.verifyLogin);
 
 /**
  * @route POST /auth/forgot-password
@@ -48,6 +56,14 @@ router.post('/reset-password', validateResetPassword, AuthController.resetPasswo
  * @access Public
  */
 router.post('/google', AuthController.googleLogin);
+
+/**
+ * @route POST /auth/push-token
+ * @description Registra o actualiza el push_token de Firebase/Expo para el usuario autenticado
+ * @access Private
+ */
+router.post('/push-token', authenticateToken, AuthController.savePushToken);
+router.post('/test-push', authenticateToken, AuthController.testPush);
 
 /**
  * @route GET /auth/profile

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
+import { displaySystemNotification } from './notificationService';
 
 const getAnimalEmoji = (tipo, especie = '', nombre = '') => {
     const t = tipo || '';
@@ -233,6 +234,11 @@ export default function AgendarCitaScreen({ route, navigation }) {
             const response = await api.post('/citas', body);
 
             if (response.data.success) {
+                await displaySystemNotification(
+                    '📅 Cita Solicitada con Éxito',
+                    `Tu cita médica para ${fechaCita} a las ${horaCita.substring(0, 5)} ha sido registrada.`,
+                    { screen: 'Citas' }
+                );
                 setSuccessMessage('¡Cita agendada correctamente!');
                 setTimeout(() => {
                     navigation.replace('Citas');

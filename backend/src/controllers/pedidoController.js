@@ -34,6 +34,30 @@ class PedidoController {
                 comprobante_pago
             });
 
+            // Notificación Push: Pedido Recibido (Cliente y Administradores)
+            try {
+                const NotificationService = require('../services/notificationService');
+                NotificationService.notifyPedidoRecibido({
+                    usuarioId: userId,
+                    codigoRetiro: newOrder.codigo_retiro,
+                    total: newOrder.total,
+                    pedidoId: newOrder.id
+                }).catch(e => console.error('Error enviando push pedido recibido:', e));
+
+                // Notificar a todos los administradores del nuevo pedido en tienda
+                NotificationService.notifyAllAdmins({
+                    title: '🛒 Nuevo Pedido en Tienda - VetExóticos',
+                    body: `Se ha recibido un nuevo pedido #${newOrder.codigo_retiro} por ₡${parseFloat(newOrder.total).toLocaleString('es-CR')}.`,
+                    data: {
+                        tipo: 'NUEVO_PEDIDO_ADMIN',
+                        screen: 'Inventario',
+                        pedidoId: String(newOrder.id)
+                    }
+                }).catch(e => console.error('Error push nuevo pedido admin:', e));
+            } catch (notifErr) {
+                console.warn('Error al procesar notificación de pedido recibido:', notifErr.message);
+            }
+
             res.status(201).json({
                 success: true,
                 message: 'Pedido realizado con éxito',
@@ -127,6 +151,30 @@ class PedidoController {
 
             await Pedido.cancelByClient(id, userId);
 
+            try {
+                const NotificationService = require('../services/notificationService');
+                // Notificar al cliente
+                NotificationService.notifyPedidoEstado({
+                    usuarioId: userId,
+                    codigoRetiro: `PEDIDO #${id}`,
+                    estado: 'cancelado',
+                    pedidoId: id
+                }).catch(e => console.error('Error push cancelación cliente:', e));
+
+                // Notificar a todos los administradores
+                NotificationService.notifyAllAdmins({
+                    title: '❌ Pedido Cancelado por Cliente - VetExóticos',
+                    body: `El cliente ha cancelado el pedido #${id}.`,
+                    data: {
+                        tipo: 'PEDIDO_CANCELADO_ADMIN',
+                        screen: 'Inventario',
+                        pedidoId: String(id)
+                    }
+                }).catch(e => console.error('Error push cancelación admins:', e));
+            } catch (notifErr) {
+                console.warn('Error en notificación cancelación:', notifErr.message);
+            }
+
             res.status(200).json({
                 success: true,
                 message: 'Pedido cancelado correctamente'
@@ -160,6 +208,58 @@ class PedidoController {
                     success: false,
                     message: 'Pedido no encontrado'
                 });
+            }
+
+            // Notificación Push de Estado de Pedido
+            try {
+                const NotificationService = require('../services/notificationService');
+                const pedido = await Pedido.findById(id);
+                const codigoRetiro = pedido ? pedido.codigo_retiro : id;
+
+                if (estado === 'listo') {
+                    // Notificar al cliente dueño del pedido
+                    if (pedido && pedido.usuario_id) {
+                        NotificationService.notifyPedidoListo({
+                            usuarioId: pedido.usuario_id,
+                            codigoRetiro: pedido.codigo_retiro,
+                            pedidoId: id
+                        }).catch(e => console.error('Error enviando push pedido listo al cliente:', e));
+                    }
+
+                    // Notificar a TODOS los administradores
+                    NotificationService.notifyAllAdmins({
+                        title: '🛍️ Pedido Listo para Retiro - VetExóticos',
+                        body: `El pedido #${codigoRetiro} fue marcado como LISTO para ser retirado en clínica.`,
+                        data: {
+                            tipo: 'PEDIDO_LISTO_ADMIN',
+                            screen: 'Inventario',
+                            pedidoId: String(id)
+                        }
+                    }).catch(e => console.error('Error enviando push pedido listo a admins:', e));
+                } else {
+                    // Notificar al cliente del cambio de estado de su pedido
+                    if (pedido && pedido.usuario_id) {
+                        NotificationService.notifyPedidoEstado({
+                            usuarioId: pedido.usuario_id,
+                            codigoRetiro,
+                            estado,
+                            pedidoId: id
+                        }).catch(e => console.error('Error push estado pedido al cliente:', e));
+                    }
+
+                    // Notificar a TODOS los administradores
+                    NotificationService.notifyAllAdmins({
+                        title: '🛍️ Estado de Pedido Actualizado - VetExóticos',
+                        body: `El pedido #${codigoRetiro} ahora está en estado: "${estado.toUpperCase()}".`,
+                        data: {
+                            tipo: 'PEDIDO_ESTADO_CAMBIADO',
+                            screen: 'Inventario',
+                            pedidoId: String(id)
+                        }
+                    }).catch(e => console.error('Error push estado pedido a admins:', e));
+                }
+            } catch (notifErr) {
+                console.warn('Error al procesar notificación de pedido:', notifErr.message);
             }
 
             res.status(200).json({

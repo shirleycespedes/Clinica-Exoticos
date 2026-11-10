@@ -1,8 +1,9 @@
 import 'react-native-gesture-handler';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Platform } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
+import { setupNotificationListeners } from './src/screen/notificationService';
 import LoginScreen from './src/screen/LoginScreen';
 import DashboardScreen from './src/screen/DashboardScreen';
 import RegisterScreen from './src/screen/RegisterScreen';
@@ -36,11 +37,23 @@ if (Platform.OS === 'web') {
     window.document.head.appendChild(style);
 }
 
+export const navigationRef = createNavigationContainerRef();
 const Stack = createStackNavigator();
 
 export default function App() {
+    useEffect(() => {
+        if (Platform.OS !== 'web') {
+            const cleanup = setupNotificationListeners(navigationRef);
+            return () => {
+                if (typeof cleanup === 'function') {
+                    cleanup();
+                }
+            };
+        }
+    }, []);
+
     return (
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
             <Stack.Navigator initialRouteName="Login">
                 <Stack.Screen 
                     name="Login" 

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
+import { displaySystemNotification } from './notificationService';
 
 const showAlert = (title, message) => {
     if (Platform.OS === 'web') {
@@ -357,6 +358,13 @@ export default function InventarioScreen({ navigation }) {
         try {
             const response = await api.put(`/pedidos/${orderId}/estado`, { estado: newStatus });
             if (response.data.success) {
+                const targetOrder = pedidos.find(p => p.id === orderId);
+                const codigo = targetOrder ? targetOrder.codigo_retiro : `#${orderId}`;
+                await displaySystemNotification(
+                    '🛍️ Pedido Actualizado',
+                    `El pedido ${codigo} cambió de estado a "${newStatus.toUpperCase()}".`,
+                    { screen: 'Inventario', tab: 'pedidos', orderId }
+                );
                 loadAllOrders();
             }
         } catch (err) {

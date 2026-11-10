@@ -2,11 +2,20 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform, NativeModules } from 'react-native';
 
-// IP de respaldo por si falla la detección dinámica
+// URL de la API en la nube (cuando esté desplegada en Railway, Render, etc.)
+// Si se coloca la URL aquí o en EXPO_PUBLIC_API_URL, la app usará la nube tanto en celular como en web
+const CLOUD_API_URL = process.env.EXPO_PUBLIC_API_URL || '';
+
+// IP de respaldo por si falla la detección dinámica en desarrollo local
 const FALLBACK_IP = '192.168.0.90';
 
-// Detecta dinámicamente la IP de la máquina servidor (Metro) para evitar errores de red al apagar/reiniciar
+// Detecta dinámicamente la IP o usa la nube
 const getBaseURL = () => {
+    // 0. Si hay una URL en la nube configurada, usarla prioritariamente
+    if (CLOUD_API_URL && CLOUD_API_URL.trim() !== '') {
+        return CLOUD_API_URL.trim();
+    }
+
     // 1. En la web (navegador), usar el hostname de la barra de direcciones
     if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
         return `http://${window.location.hostname}:3000/api/v1`;

@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
+import { displaySystemNotification } from './notificationService';
 
 const showAlert = (title, message) => {
     if (Platform.OS === 'web') {
@@ -190,6 +191,14 @@ export default function ExpedientesScreen({ navigation }) {
             }
 
             if (response.data.success) {
+                const isUpdate = (!headerAddMode && expediente);
+                await displaySystemNotification(
+                    isUpdate ? '📋 Expediente Clínico Actualizado' : '📋 Expediente Clínico Creado',
+                    isUpdate 
+                        ? 'Se han guardado los cambios en el expediente médico correctamente.' 
+                        : 'Se ha creado la nueva ficha médica con éxito.',
+                    { screen: 'Expedientes', expedienteId: response.data?.data?.id || expediente?.id }
+                );
                 showAlert('Éxito', (!headerAddMode && expediente) ? 'Expediente actualizado.' : 'Expediente creado correctamente.');
                 setFichaModalVisible(false);
                 if (headerAddMode) {

@@ -200,6 +200,36 @@ class PacienteController {
 
             const newPaciente = await Paciente.create(req.body);
 
+            // Notificación Push: Paciente Registrado
+            try {
+                const NotificationService = require('../services/notificationService');
+                const pacienteNombre = newPaciente.nombre || req.body.nombre;
+                const especieStr = newPaciente.especie || req.body.especie || 'Exótico';
+
+                if (propietario && propietario.usuario_id) {
+                    NotificationService.notifyPacienteGuardado({
+                        usuarioId: propietario.usuario_id,
+                        pacienteNombre,
+                        especie: especieStr,
+                        accion: 'creado',
+                        pacienteId: newPaciente.id
+                    }).catch(e => console.error('Error push paciente creado cliente:', e));
+                }
+
+                // Notificar a TODOS los administradores
+                NotificationService.notifyAllAdmins({
+                    title: '🦎 Paciente Registrado - VetExóticos',
+                    body: `El paciente ${pacienteNombre} (${especieStr}) ha sido registrado en el sistema.`,
+                    data: {
+                        tipo: 'PACIENTE_GUARDADO_ADMIN',
+                        screen: 'Mascotas',
+                        pacienteId: String(newPaciente.id)
+                    }
+                }).catch(e => console.error('Error push paciente creado a admins:', e));
+            } catch (notifErr) {
+                console.warn('Error en notificación paciente creado:', notifErr.message);
+            }
+
             res.status(201).json({
                 success: true,
                 message: 'Paciente creado correctamente',
@@ -247,6 +277,38 @@ class PacienteController {
             }
 
             const updatedPaciente = await Paciente.update(id, req.body);
+
+            // Notificación Push: Paciente Actualizado
+            try {
+                const NotificationService = require('../services/notificationService');
+                const Propietario = require('../models/Propietario');
+                const propietario = await Propietario.findById(existingPaciente.propietario_id);
+                const pacienteNombre = req.body.nombre || existingPaciente.nombre;
+                const especieStr = req.body.especie || existingPaciente.especie || 'Exótico';
+
+                if (propietario && propietario.usuario_id) {
+                    NotificationService.notifyPacienteGuardado({
+                        usuarioId: propietario.usuario_id,
+                        pacienteNombre,
+                        especie: especieStr,
+                        accion: 'actualizado',
+                        pacienteId: id
+                    }).catch(e => console.error('Error push paciente actualizado cliente:', e));
+                }
+
+                // Notificar a TODOS los administradores
+                NotificationService.notifyAllAdmins({
+                    title: '🦎 Paciente Actualizado - VetExóticos',
+                    body: `Los datos del paciente ${pacienteNombre} (${especieStr}) han sido actualizados en el sistema.`,
+                    data: {
+                        tipo: 'PACIENTE_GUARDADO_ADMIN',
+                        screen: 'Mascotas',
+                        pacienteId: String(id)
+                    }
+                }).catch(e => console.error('Error push paciente actualizado a admins:', e));
+            } catch (notifErr) {
+                console.warn('Error en notificación paciente actualizado:', notifErr.message);
+            }
 
             res.status(200).json({
                 success: true,

@@ -213,6 +213,13 @@ export default function UsuariosScreen({ navigation }) {
                         <Text style={styles.backButtonText}>‹ Volver</Text>
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Gestión de Usuarios</Text>
+                    <View style={{ flex: 1 }} />
+                    <TouchableOpacity 
+                        style={styles.newAdminButton}
+                        onPress={() => navigation.navigate('Register')}
+                    >
+                        <Text style={styles.newAdminButtonText}>➕ Nuevo Admin</Text>
+                    </TouchableOpacity>
                 </View>
 
                 {/* Barra de Búsqueda */}
@@ -316,6 +323,17 @@ const styles = StyleSheet.create({
         fontSize: 20,
         fontWeight: 'bold',
         color: '#1e293b',
+    },
+    newAdminButton: {
+        backgroundColor: '#2563eb',
+        paddingVertical: 7,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+    },
+    newAdminButtonText: {
+        color: '#ffffff',
+        fontSize: 13,
+        fontWeight: 'bold',
     },
     searchContainer: {
         padding: 16,

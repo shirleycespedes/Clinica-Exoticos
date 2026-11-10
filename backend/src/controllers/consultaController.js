@@ -228,6 +228,41 @@ class ConsultaController {
 
             const newConsulta = await Consulta.create(req.body);
 
+            // Notificación Push 3: Nueva Consulta Médica Registrada
+            try {
+                const NotificationService = require('../services/notificationService');
+                const paciente = await Paciente.findById(expediente.paciente_id);
+                if (paciente) {
+                    const prop = await Propietario.findById(paciente.propietario_id);
+                    const vetNombre = newConsulta.veterinario || req.body.veterinario;
+                    const motivoStr = newConsulta.motivo || req.body.motivo;
+
+                    // 1. Notificar al Cliente
+                    if (prop && prop.usuario_id) {
+                        NotificationService.notifyNuevaConsulta({
+                            usuarioId: prop.usuario_id,
+                            pacienteNombre: paciente.nombre,
+                            veterinario: vetNombre,
+                            motivo: motivoStr,
+                            consultaId: newConsulta.id
+                        }).catch(e => console.error('Error enviando push nueva consulta al cliente:', e));
+                    }
+
+                    // 2. Notificar a TODOS los administradores
+                    NotificationService.notifyAllAdmins({
+                        title: '🩺 Nueva Consulta Médica - VetExóticos',
+                        body: `Dr. ${vetNombre || 'Veterinario'} registró una consulta médica para ${paciente.nombre} (Motivo: "${motivoStr}").`,
+                        data: {
+                            tipo: 'NUEVA_CONSULTA_ADMIN',
+                            screen: 'Consultas',
+                            consultaId: String(newConsulta.id)
+                        }
+                    }).catch(e => console.error('Error enviando push nueva consulta a admins:', e));
+                }
+            } catch (notifErr) {
+                console.warn('Error al procesar notificación de consulta médica:', notifErr.message);
+            }
+
             res.status(201).json({
                 success: true,
                 message: 'Consulta creada correctamente',
@@ -275,6 +310,48 @@ class ConsultaController {
             }
 
             const updatedConsulta = await Consulta.update(id, req.body);
+
+            // Notificación Push: Consulta Editada / Actualizada
+            try {
+                const NotificationService = require('../services/notificationService');
+                const Expediente = require('../models/Expediente');
+                const Paciente = require('../models/Paciente');
+                const Propietario = require('../models/Propietario');
+                const exp = await Expediente.findById(existingConsulta.expediente_id);
+                if (exp) {
+                    const pac = await Paciente.findById(exp.paciente_id);
+                    if (pac) {
+                        const prop = await Propietario.findById(pac.propietario_id);
+                        const pacienteNombre = pac.nombre;
+                        const vetNombre = req.body.veterinario || existingConsulta.veterinario;
+                        const motivoStr = req.body.motivo || existingConsulta.motivo;
+
+                        // Notificar al cliente
+                        if (prop && prop.usuario_id) {
+                            NotificationService.notifyConsultaActualizada({
+                                usuarioId: prop.usuario_id,
+                                pacienteNombre,
+                                veterinario: vetNombre,
+                                motivo: motivoStr,
+                                consultaId: id
+                            }).catch(e => console.error('Error push consulta cliente:', e));
+                        }
+
+                        // Notificar a TODOS los administradores
+                        NotificationService.notifyAllAdmins({
+                            title: '🩺 Consulta Médica Actualizada - VetExóticos',
+                            body: `Dr. ${vetNombre || 'Veterinario'} actualizó la consulta médica de ${pacienteNombre} con nuevas observaciones.`,
+                            data: {
+                                tipo: 'CONSULTA_ACTUALIZADA_ADMIN',
+                                screen: 'Consultas',
+                                consultaId: String(id)
+                            }
+                        }).catch(e => console.error('Error push consulta actualizada a admins:', e));
+                    }
+                }
+            } catch (notifErr) {
+                console.warn('Error en notificación consulta actualizada:', notifErr.message);
+            }
 
             res.status(200).json({
                 success: true,

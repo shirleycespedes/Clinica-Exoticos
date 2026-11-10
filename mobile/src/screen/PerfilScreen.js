@@ -13,6 +13,11 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
+import { 
+    registerForPushNotificationsAsync, 
+    triggerPushNotificationTest,
+    displaySystemNotification 
+} from './notificationService';
 
 const showAlert = (title, message) => {
     if (Platform.OS === 'web') {
@@ -46,6 +51,47 @@ export default function PerfilScreen({ navigation }) {
     const [generalError, setGeneralError] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
     const [isEditing, setIsEditing] = useState(false);
+    const [testingPush, setTestingPush] = useState(false);
+
+    const handleTestPush = async (tipo = 'todas') => {
+        setTestingPush(true);
+        try {
+            await registerForPushNotificationsAsync();
+            const res = await triggerPushNotificationTest(tipo);
+
+            // Desplegar visualmente notificación de sistema (funciona en Web y Móvil)
+            if (tipo === 'cita' || tipo === 'todas') {
+                displaySystemNotification(
+                    '📅 Cita Confirmada - VetExóticos',
+                    '¡Tu cita para Draco ha sido confirmada con la Dra. Sofía Mora para hoy a las 10:30 AM!',
+                    { screen: 'Citas' }
+                );
+            }
+            if (tipo === 'pedido' || tipo === 'todas') {
+                displaySystemNotification(
+                    '🛍️ ¡Tu pedido está listo! - VetExóticos',
+                    'Tu pedido #VET-883921 ya está empacado y listo para retiro en la clínica.',
+                    { screen: 'Tienda' }
+                );
+            }
+            if (tipo === 'consulta' || tipo === 'todas') {
+                displaySystemNotification(
+                    '🩺 Nueva Consulta Médica - VetExóticos',
+                    'El Dr. Alejandro Peña ha registrado una consulta médica para Draco: "Control de muda".',
+                    { screen: 'Consultas' }
+                );
+            }
+
+            showAlert(
+                '¡Notificación Enviada!', 
+                res.message || 'Se ha enviado la notificación push y se ha guardado en tu historial.'
+            );
+        } catch (err) {
+            showAlert('Notificaciones Push', err.response?.data?.message || err.message || 'No se pudo enviar la notificación');
+        } finally {
+            setTestingPush(false);
+        }
+    };
 
     useEffect(() => {
         const loadProfile = async () => {
@@ -312,6 +358,52 @@ export default function PerfilScreen({ navigation }) {
                                             disabled={saving}
                                         >
                                             <Text style={styles.deleteAccountButtonText}>🗑️ Eliminar Cuenta</Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {/* Notificaciones Push Card */}
+                                    <View style={styles.pushCard}>
+                                        <Text style={styles.pushCardTitle}>🔔 Notificaciones Push del Sistema</Text>
+                                        <Text style={styles.pushCardSub}>
+                                            El sistema cuenta con las 3 notificaciones push automáticas requeridas. Puedes probar cualquiera de ellas individualmente o disparar las 3 al mismo tiempo:
+                                        </Text>
+
+                                        <View style={styles.pushButtonsGrid}>
+                                            <TouchableOpacity 
+                                                style={[styles.testItemBtn, styles.testCitaBtn]} 
+                                                onPress={() => handleTestPush('cita')}
+                                                disabled={testingPush}
+                                            >
+                                                <Text style={styles.testItemBtnText}>📅 1. Cita Confirmada</Text>
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity 
+                                                style={[styles.testItemBtn, styles.testPedidoBtn]} 
+                                                onPress={() => handleTestPush('pedido')}
+                                                disabled={testingPush}
+                                            >
+                                                <Text style={styles.testItemBtnText}>🛍️ 2. Pedido Listo</Text>
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity 
+                                                style={[styles.testItemBtn, styles.testConsultaBtn]} 
+                                                onPress={() => handleTestPush('consulta')}
+                                                disabled={testingPush}
+                                            >
+                                                <Text style={styles.testItemBtnText}>🩺 3. Nueva Consulta</Text>
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        <TouchableOpacity 
+                                            style={styles.testAllBtn} 
+                                            onPress={() => handleTestPush('todas')}
+                                            disabled={testingPush}
+                                        >
+                                            {testingPush ? (
+                                                <ActivityIndicator size="small" color="#fff" />
+                                            ) : (
+                                                <Text style={styles.testAllBtnText}>🚀 Disparar las 3 Notificaciones Juntas</Text>
+                                            )}
                                         </TouchableOpacity>
                                     </View>
                                 </View>
@@ -675,5 +767,63 @@ const styles = StyleSheet.create({
         borderTopWidth: 1,
         borderTopColor: '#f1f5f9',
         paddingTop: 15,
+    },
+    pushCard: {
+        marginTop: 25,
+        backgroundColor: '#f0fdf4',
+        borderWidth: 1,
+        borderColor: '#bbf7d0',
+        borderRadius: 12,
+        padding: 16,
+    },
+    pushCardTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#166534',
+        marginBottom: 6,
+    },
+    pushCardSub: {
+        fontSize: 13,
+        color: '#15803d',
+        marginBottom: 14,
+        lineHeight: 18,
+    },
+    pushButtonsGrid: {
+        gap: 8,
+        marginBottom: 12,
+    },
+    testItemBtn: {
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    testCitaBtn: {
+        backgroundColor: '#0284c7',
+    },
+    testPedidoBtn: {
+        backgroundColor: '#7c3aed',
+    },
+    testConsultaBtn: {
+        backgroundColor: '#059669',
+    },
+    testItemBtnText: {
+        color: '#ffffff',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    testAllBtn: {
+        backgroundColor: '#16a34a',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#15803d',
+    },
+    testAllBtnText: {
+        color: '#ffffff',
+        fontSize: 14,
+        fontWeight: 'bold',
     },
 });

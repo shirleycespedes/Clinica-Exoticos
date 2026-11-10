@@ -203,6 +203,37 @@ class CitaController {
 
             const newCita = await Cita.create(req.body);
 
+            // Notificaciones de Cita Creada / Solicitada
+            try {
+                const NotificationService = require('../services/notificationService');
+                const prop = await Propietario.findById(propietarioId);
+                const horaStr = (req.body.hora_cita || '').substring(0, 5);
+
+                // Notificar al cliente dueño de la mascota
+                if (prop && prop.usuario_id) {
+                    NotificationService.notifyCitaCreada({
+                        usuarioId: prop.usuario_id,
+                        pacienteNombre: paciente.nombre,
+                        fecha: req.body.fecha_cita,
+                        hora: horaStr,
+                        citaId: newCita.id
+                    }).catch(e => console.error('Error push cita creada cliente:', e));
+                }
+
+                // Notificar a TODOS los administradores
+                NotificationService.notifyAllAdmins({
+                    title: '📅 Nueva Cita Agendada - VetExóticos',
+                    body: `Se ha agendado una cita para ${paciente.nombre} (${prop ? prop.nombre : 'Cliente'}) el ${req.body.fecha_cita} a las ${horaStr}.`,
+                    data: {
+                        tipo: 'NUEVA_CITA_ADMIN',
+                        screen: 'Citas',
+                        citaId: String(newCita.id)
+                    }
+                }).catch(e => console.error('Error push nueva cita a admins:', e));
+            } catch (notifErr) {
+                console.warn('Error al procesar notificación de nueva cita:', notifErr.message);
+            }
+
             res.status(201).json({
                 success: true,
                 message: 'Cita creada correctamente',
@@ -250,6 +281,45 @@ class CitaController {
             }
 
             const updatedCita = await Cita.update(id, req.body);
+
+            // Notificación Push 1: Cita Confirmada
+            if (req.body.estado === 'confirmada' || (req.body.veterinario_asignado && req.body.estado !== 'cancelada')) {
+                try {
+                    const NotificationService = require('../services/notificationService');
+                    const prop = await Propietario.findById(existingCita.propietario_id);
+                    const pac = await Paciente.findById(existingCita.paciente_id);
+                    const rawDate = new Date(req.body.fecha_cita || existingCita.fecha_cita);
+                    const fechaFormateada = !isNaN(rawDate) ? rawDate.toISOString().split('T')[0] : (req.body.fecha_cita || existingCita.fecha_cita);
+                    const horaFormateada = (req.body.hora_cita || existingCita.hora_cita || '').substring(0, 5);
+                    const pacienteNombre = pac ? pac.nombre : 'tu mascota';
+                    const vetNombre = req.body.veterinario_asignado || existingCita.veterinario_asignado;
+
+                    // 1. Notificar al Cliente (dueño de la mascota)
+                    if (prop && prop.usuario_id) {
+                        NotificationService.notifyCitaConfirmada({
+                            usuarioId: prop.usuario_id,
+                            pacienteNombre,
+                            fecha: fechaFormateada,
+                            hora: horaFormateada,
+                            veterinario: vetNombre,
+                            citaId: id
+                        }).catch(e => console.error('Error enviando push cita confirmada al cliente:', e));
+                    }
+
+                    // 2. Notificar a TODOS los administradores
+                    NotificationService.notifyAllAdmins({
+                        title: '📅 Cita Médica Confirmada - VetExóticos',
+                        body: `La cita de ${pacienteNombre} para el ${fechaFormateada} a las ${horaFormateada} ha sido confirmada con ${vetNombre || 'el veterinario'}.`,
+                        data: {
+                            tipo: 'CITA_CONFIRMADA_ADMIN',
+                            screen: 'Citas',
+                            citaId: String(id)
+                        }
+                    }).catch(e => console.error('Error enviando push cita confirmada a admins:', e));
+                } catch (notifErr) {
+                    console.warn('Error al procesar notificación de cita:', notifErr.message);
+                }
+            }
 
             res.status(200).json({
                 success: true,

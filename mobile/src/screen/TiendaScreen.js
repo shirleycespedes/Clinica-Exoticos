@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
+import { displaySystemNotification } from './notificationService';
 
 const showAlert = (title, message) => {
     if (Platform.OS === 'web') {
@@ -217,8 +218,17 @@ export default function TiendaScreen({ navigation }) {
 
             const response = await api.post('/pedidos', checkoutBody);
             if (response.data.success) {
-                setLatestOrderCode(response.data.data.codigo_retiro);
-                setLatestOrderId(response.data.data.id);
+                const cod = response.data.data.codigo_retiro;
+                const ordId = response.data.data.id;
+                
+                await displaySystemNotification(
+                    '📦 ¡Pedido Realizado con Éxito!',
+                    `Tu pedido #${cod} por ₡${parseFloat(checkoutBody.total).toLocaleString('es-CR')} ha sido registrado. Te avisaremos cuando esté listo.`,
+                    { screen: 'Tienda', pedidoId: String(ordId) }
+                );
+
+                setLatestOrderCode(cod);
+                setLatestOrderId(ordId);
                 setCart([]);
                 setCartModalVisible(false);
                 setSuccessModalVisible(true);
@@ -307,6 +317,11 @@ export default function TiendaScreen({ navigation }) {
         try {
             const response = await api.put(`/pedidos/${orderId}/cancelar`);
             if (response.data.success) {
+                await displaySystemNotification(
+                    '❌ Pedido Cancelado',
+                    'Tu pedido ha sido cancelado con éxito.',
+                    { screen: 'Tienda' }
+                );
                 showAlert('Pedido Cancelado', 'Tu pedido ha sido cancelado con éxito.');
                 loadMyOrders();
                 loadProducts();

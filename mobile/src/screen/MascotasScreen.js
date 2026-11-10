@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
+import { displaySystemNotification } from './notificationService';
 
 const showAlert = (title, message) => {
     if (Platform.OS === 'web') {
@@ -317,6 +318,11 @@ export default function MascotasScreen({ navigation }) {
 
             const response = await api.post('/pacientes', body);
             if (response.data.success) {
+                await displaySystemNotification(
+                    '🦎 Paciente Registrado',
+                    `Se ha registrado al paciente "${nombre.trim()}" (${especie.trim()}) exitosamente.`,
+                    { screen: 'Mascotas', pacienteId: response.data?.data?.id }
+                );
                 showAlert('Éxito', 'Paciente agregado correctamente.');
                 
                 // Reset form fields

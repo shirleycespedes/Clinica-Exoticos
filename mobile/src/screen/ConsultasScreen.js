@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
+import { displaySystemNotification } from './notificationService';
 
 const showAlert = (title, message) => {
     if (Platform.OS === 'web') {
@@ -229,6 +230,11 @@ export default function ConsultasScreen({ navigation }) {
                 body.expediente_id = editingConsulta.expediente_id;
                 const response = await api.put(`/consultas/${editingConsulta.id}`, body);
                 if (response.data.success) {
+                    await displaySystemNotification(
+                        '🩺 Consulta Médica Actualizada',
+                        `Se actualizaron los datos clínicos y observaciones de la consulta (Dr. ${veterinario.trim()}).`,
+                        { screen: 'Consultas', consultaId: editingConsulta.id }
+                    );
                     showAlert('Éxito', 'Consulta médica actualizada.');
                     setConsultaModalVisible(false);
                     loadInitialData();
@@ -239,6 +245,11 @@ export default function ConsultasScreen({ navigation }) {
                 const response = await api.post('/consultas', body);
                 
                 if (response.data.success) {
+                    await displaySystemNotification(
+                        '🩺 Consulta Médica Registrada',
+                        `Se registró la nueva consulta médica para el paciente.`,
+                        { screen: 'Consultas', consultaId: response.data?.data?.id }
+                    );
                     // Si se vinculó a una cita, marcarla completada
                     if (tipoConsulta === 'cita' && selectedAppointmentId) {
                         const appToComplete = pendingAppointments.find(a => a.id.toString() === selectedAppointmentId);

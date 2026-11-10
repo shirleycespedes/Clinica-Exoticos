@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
+import { displaySystemNotification } from './notificationService';
 
 const showAlert = (title, message) => {
     if (Platform.OS === 'web') {
@@ -175,6 +176,13 @@ export default function CitasScreen({ navigation }) {
 
             const response = await api.put(`/citas/${selectedCita.id}`, body);
             if (response.data.success) {
+                if (statusToUpdate === 'confirmada') {
+                    displaySystemNotification(
+                        '📅 Cita Confirmada - VetExóticos',
+                        `¡La cita para ${selectedCita.paciente_nombre || 'el paciente'} ha sido confirmada con ${vetToUpdate}!`,
+                        { screen: 'Citas', citaId: selectedCita.id }
+                    );
+                }
                 showAlert('Éxito', 'La cita se actualizó correctamente.');
                 setManageModalVisible(false);
                 loadUserAndCitas();

@@ -23,6 +23,7 @@ const productoRoutes = require('./src/routes/productoRoutes');
 const pedidoRoutes = require('./src/routes/pedidoRoutes');
 const inventarioRoutes = require('./src/routes/inventarioRoutes');
 const reporteRoutes = require('./src/routes/reporteRoutes');
+const notificacionRoutes = require('./src/routes/notificacionRoutes');
 
 // Crear aplicación Express
 const app = express();
@@ -38,9 +39,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.use(cors({
-    origin: process.env.NODE_ENV === 'production' 
-        ? ['https://tu-dominio.com'] 
-        : true,
+    origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -110,6 +109,7 @@ app.use(`${API_PREFIX}/productos`, productoRoutes);
 app.use(`${API_PREFIX}/pedidos`, pedidoRoutes);
 app.use(`${API_PREFIX}/inventario`, inventarioRoutes);
 app.use(`${API_PREFIX}/reportes`, reporteRoutes);
+app.use(`${API_PREFIX}/notificaciones`, notificacionRoutes);
 
 /**
  * MANEJO DE ERRORES

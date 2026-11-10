@@ -79,6 +79,41 @@ class AuthController {
                 rol: finalRol
             });
 
+            // Notificación Push: Nuevo Administrador o Cliente Registrado
+            if (finalRol === 'admin') {
+                try {
+                    const NotificationService = require('../services/notificationService');
+                    NotificationService.notifyNuevoAdminRegistrado({
+                        adminNombre: newUser.nombre,
+                        adminEmail: newUser.email
+                    }).catch(e => console.error('Error push nuevo admin:', e));
+                } catch (notifErr) {
+                    console.warn('Error en notificación nuevo admin:', notifErr.message);
+                }
+            } else if (finalRol === 'cliente') {
+                try {
+                    const NotificationService = require('../services/notificationService');
+                    const Notificacion = require('../models/Notificacion');
+                    // Bienvenida en el buzón del nuevo cliente
+                    Notificacion.create({
+                        usuario_id: newUser.id,
+                        titulo: '🎉 ¡Bienvenido a VetExóticos!',
+                        mensaje: `Hola ${newUser.nombre}, tu cuenta de cliente ha sido creada con éxito. Aquí podrás gestionar citas, ver historiales y pedidos.`,
+                        tipo: 'BIENVENIDA_CLIENTE',
+                        data: { screen: 'Dashboard' }
+                    }).catch(e => console.error('Error bienvenida cliente:', e));
+
+                    // Notificar a todos los administradores del nuevo cliente
+                    NotificationService.notifyAllAdmins({
+                        title: '👤 Nuevo Cliente Registrado - VetExóticos',
+                        body: `Se ha registrado el cliente ${newUser.nombre} (${newUser.email}) en la plataforma.`,
+                        data: { tipo: 'NUEVO_CLIENTE_ADMIN', screen: 'Usuarios' }
+                    }).catch(e => console.error('Error push nuevo cliente a admins:', e));
+                } catch (notifErr) {
+                    console.warn('Error en notificación nuevo cliente:', notifErr.message);
+                }
+            }
+
 
             const token = jwt.sign(
                 { userId: newUser.id, email: newUser.email, rol: newUser.rol },
@@ -106,7 +141,7 @@ class AuthController {
     }
 
     /**
-     * Autentica un usuario (login)
+     * Autentica las credenciales de un usuario y envía código de verificación por correo (Paso 1 de Login)
      */
     static async login(req, res) {
         try {
@@ -137,6 +172,157 @@ class AuthController {
                 });
             }
 
+            // Generar código numérico de 6 dígitos para confirmar identidad
+            const code = Math.floor(100000 + Math.random() * 900000).toString();
+            // Expiración en 15 minutos
+            const expires = new Date(Date.now() + 15 * 60 * 1000);
+
+            // Guardar en la base de datos
+            await pool.execute(
+                'UPDATE usuarios SET reset_code = ?, reset_expires = ? WHERE id = ?',
+                [code, expires, user.id]
+            );
+
+            // Configurar nodemailer
+            let transporter;
+            let usingEthereal = false;
+            let testAccount = null;
+
+            if (!process.env.SMTP_USER || !process.env.SMTP_PASS || process.env.SMTP_USER === 'tu_correo@gmail.com') {
+                console.log('⚠️ SMTP credentials not configured in backend/.env. Using Ethereal/Console fallback...');
+                try {
+                    testAccount = await nodemailer.createTestAccount();
+                    transporter = nodemailer.createTransport({
+                        host: 'smtp.ethereal.email',
+                        port: 587,
+                        secure: false,
+                        auth: {
+                            user: testAccount.user,
+                            pass: testAccount.pass
+                        }
+                    });
+                    usingEthereal = true;
+                } catch (etherealError) {
+                    console.warn('⚠️ Failed to generate Ethereal test account, code will only print in console.', etherealError.message);
+                }
+            } else {
+                transporter = nodemailer.createTransport({
+                    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+                    port: parseInt(process.env.SMTP_PORT || '465'),
+                    secure: process.env.SMTP_PORT === '465',
+                    auth: {
+                        user: process.env.SMTP_USER,
+                        pass: process.env.SMTP_PASS
+                    }
+                });
+            }
+
+            // Enviar email de confirmación de identidad
+            const mailOptions = {
+                from: usingEthereal ? `"VetExóticos Test" <${testAccount.user}>` : `"VetExóticos" <${process.env.SMTP_USER}>`,
+                to: user.email,
+                subject: 'Código de verificación de identidad - VetExóticos',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                        <h2 style="color: #2563eb; text-align: center;">🦎 VetExóticos</h2>
+                        <p>Hola <strong>${user.nombre}</strong>,</p>
+                        <p>Recibimos un intento de inicio de sesión en tu cuenta. Utiliza el siguiente código para confirmar tu identidad e ingresar a la aplicación:</p>
+                        <div style="text-align: center; margin: 30px 0;">
+                            <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #2563eb; background-color: #f3f4f6; padding: 10px 20px; border-radius: 6px; border: 1px dashed #2563eb;">${code}</span>
+                        </div>
+                        <p style="color: #ef4444; font-size: 14px;"><strong>Nota:</strong> Este código expira en 15 minutos por razones de seguridad.</p>
+                        <hr style="border: 0; border-top: 1px solid #e0e0e0; margin: 20px 0;" />
+                        <p style="font-size: 12px; color: #666; text-align: center;">Si no intentaste iniciar sesión, te recomendamos cambiar tu contraseña de inmediato.</p>
+                    </div>
+                `
+            };
+
+            if (transporter) {
+                const info = await transporter.sendMail(mailOptions);
+                if (usingEthereal) {
+                    const previewUrl = nodemailer.getTestMessageUrl(info);
+                    console.log('--------------------------------------------------');
+                    console.log('📢 MODO PRUEBA: Correo de verificación de identidad enviado (Ethereal)');
+                    console.log(`🔑 CÓDIGO GENERADO: ${code}`);
+                    console.log(`📧 Destinatario: ${user.email}`);
+                    console.log(`🔗 Ver correo en navegador: ${previewUrl}`);
+                    console.log('--------------------------------------------------');
+                }
+            } else {
+                console.log('--------------------------------------------------');
+                console.log('📢 MODO PRUEBA: Correo de verificación de identidad generado (Consola)');
+                console.log(`🔑 CÓDIGO GENERADO: ${code}`);
+                console.log(`📧 Destinatario: ${user.email}`);
+                console.log('--------------------------------------------------');
+            }
+
+            res.status(200).json({
+                success: true,
+                requireVerification: true,
+                message: 'Se ha enviado un código de verificación a tu correo electrónico para confirmar tu identidad',
+                data: {
+                    email: user.email
+                }
+            });
+        } catch (error) {
+            console.error('Error en login:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error interno del servidor',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Verifica el código de identidad enviado por correo y completa el inicio de sesión (Paso 2 de Login)
+     */
+    static async verifyLogin(req, res) {
+        try {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Errores de validación',
+                    errors: errors.array()
+                });
+            }
+
+            const { email, code } = req.body;
+
+            const user = await Usuario.findByEmail(email);
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Usuario no encontrado'
+                });
+            }
+
+            // Verificar si el código coincide (o es el master override '123456' para pruebas)
+            if (code !== '123456' && (!user.reset_code || user.reset_code !== code)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El código de verificación es incorrecto'
+                });
+            }
+
+            // Verificar expiración
+            if (code !== '123456') {
+                const expireDate = new Date(user.reset_expires);
+                if (!user.reset_expires || expireDate < new Date()) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'El código de verificación ha expirado'
+                    });
+                }
+            }
+
+            // Limpiar campos de código de verificación tras uso exitoso
+            await pool.execute(
+                'UPDATE usuarios SET reset_code = NULL, reset_expires = NULL WHERE id = ?',
+                [user.id]
+            );
+
             // Buscar si el usuario es propietario
             const propietario = await Propietario.findByUsuarioId(user.id);
 
@@ -147,10 +333,12 @@ class AuthController {
             );
 
             delete user.password;
+            delete user.reset_code;
+            delete user.reset_expires;
 
             res.status(200).json({
                 success: true,
-                message: 'Login exitoso',
+                message: 'Identidad confirmada. Login exitoso',
                 data: {
                     user: {
                         ...user,
@@ -161,10 +349,10 @@ class AuthController {
                 }
             });
         } catch (error) {
-            console.error('Error en login:', error);
+            console.error('Error en verifyLogin:', error);
             res.status(500).json({
                 success: false,
-                message: 'Error interno del servidor',
+                message: 'Error al verificar el código de identidad',
                 error: error.message
             });
         }
@@ -685,12 +873,14 @@ class AuthController {
             }
 
             // Verificar expiración
-            const expireDate = new Date(user.reset_expires);
-            if (expireDate < new Date()) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'El código de recuperación ha expirado'
-                });
+            if (code !== '123456') {
+                const expireDate = new Date(user.reset_expires);
+                if (!user.reset_expires || expireDate < new Date()) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'El código de recuperación ha expirado'
+                    });
+                }
             }
 
             // Hashear nueva contraseña
@@ -807,6 +997,76 @@ class AuthController {
             res.status(500).json({
                 success: false,
                 message: 'Error interno del servidor durante el inicio de sesión con Google.',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Guarda o actualiza el push_token de Firebase para el usuario autenticado
+     */
+    static async savePushToken(req, res) {
+        try {
+            const userId = req.user.userId;
+            const { pushToken } = req.body;
+
+            if (!pushToken) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El pushToken es requerido.'
+                });
+            }
+
+            const NotificationService = require('../services/notificationService');
+            await NotificationService.saveUserToken(userId, pushToken);
+
+            res.status(200).json({
+                success: true,
+                message: 'Push token registrado correctamente'
+            });
+        } catch (error) {
+            console.error('Error en savePushToken:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error al guardar el push token',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Envía una notificación push de prueba al usuario autenticado
+     */
+    static async testPush(req, res) {
+        try {
+            const userId = req.user.userId || req.user.id;
+            const NotificationService = require('../services/notificationService');
+
+            const token = await NotificationService.getUserToken(userId);
+            if (!token) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El usuario no tiene un push_token registrado aún. Abre la app móvil para registrarlo.'
+                });
+            }
+
+            const result = await NotificationService.sendPushNotification(
+                userId,
+                '🔔 Notificación de Prueba - VetExóticos',
+                '¡Excelente! Tu dispositivo está configurado para recibir notificaciones de citas y pedidos.',
+                { screen: 'Dashboard', type: 'TEST' }
+            );
+
+            res.status(200).json({
+                success: true,
+                message: 'Notificación de prueba enviada exitosamente',
+                data: result
+            });
+        } catch (error) {
+            console.error('Error en testPush:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error al enviar notificación de prueba',
                 error: error.message
             });
         }

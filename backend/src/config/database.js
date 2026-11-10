@@ -17,13 +17,17 @@ const dbConfig = {
     database: process.env.DB_NAME || 'clinica_exoticos',
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    queueLimit: 0,
+    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined
 };
 
 /**
  * Pool de conexiones a la base de datos
+ * Soporta tanto URL directa (DATABASE_URL / MYSQL_URL de Railway, Render, TiDB) como variables separadas
  */
-const pool = mysql.createPool(dbConfig);
+const pool = (process.env.DATABASE_URL || process.env.MYSQL_URL)
+    ? mysql.createPool(process.env.DATABASE_URL || process.env.MYSQL_URL)
+    : mysql.createPool(dbConfig);
 
 /**
  * Función para probar la conexión a la base de datos

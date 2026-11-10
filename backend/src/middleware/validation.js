@@ -88,6 +88,23 @@ const validateResetPassword = [
         .isLength({ min: 6 }).withMessage('La nueva contraseña debe tener al menos 6 caracteres'),
 ];
 
+/**
+ * Validaciones para verificación de identidad en login (código 2FA por correo)
+ */
+const validateVerifyLogin = [
+    body('email')
+        .trim()
+        .notEmpty().withMessage('El email es requerido')
+        .isEmail().withMessage('Debe ser un email válido')
+        .normalizeEmail(),
+
+    body('code')
+        .trim()
+        .notEmpty().withMessage('El código de verificación es requerido')
+        .isLength({ min: 6, max: 6 }).withMessage('El código debe tener exactamente 6 dígitos')
+        .isNumeric().withMessage('El código debe ser numérico')
+];
+
 // ============================================
 // VALIDACIONES DE PROPIETARIOS
 // ============================================
@@ -289,6 +306,7 @@ module.exports = {
     validateLogin,
     validateForgotPassword,
     validateResetPassword,
+    validateVerifyLogin,
     validatePropietario,
     validatePaciente,
     validateCita,

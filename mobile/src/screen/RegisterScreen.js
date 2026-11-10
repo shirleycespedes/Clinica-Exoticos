@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { register } from './authService';
+import { displaySystemNotification } from './notificationService';
 
 export default function RegisterScreen({ navigation }) {
     const [nombre, setNombre] = useState('');
@@ -122,6 +123,14 @@ export default function RegisterScreen({ navigation }) {
         try {
             await register(nombre, email, password, telefono || undefined, rol);
             
+            if (rol === 'admin') {
+                await displaySystemNotification(
+                    '🛡️ Nuevo Administrador Registrado',
+                    `Se ha otorgado acceso administrativo a ${nombre.trim()} (${email.trim()}).`,
+                    { screen: 'Usuarios' }
+                );
+            }
+
             setSuccessMessage(
                 rol === 'admin'
                     ? '¡Administrador registrado correctamente!'

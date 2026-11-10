@@ -101,6 +101,39 @@ class ExpedienteController {
 
             const newExpediente = await Expediente.create(req.body);
 
+            // Notificación Push: Expediente Creado
+            try {
+                const NotificationService = require('../services/notificationService');
+                const Paciente = require('../models/Paciente');
+                const Propietario = require('../models/Propietario');
+                const pac = await Paciente.findById(req.body.paciente_id);
+                const pacNombre = pac ? pac.nombre : 'Paciente';
+                const prop = pac ? await Propietario.findById(pac.propietario_id) : null;
+
+                if (prop && prop.usuario_id) {
+                    NotificationService.notifyExpedienteGuardado({
+                        usuarioId: prop.usuario_id,
+                        numeroExpediente: newExpediente.numero_expediente || newExpediente.id,
+                        pacienteNombre: pacNombre,
+                        accion: 'creado',
+                        expedienteId: newExpediente.id
+                    }).catch(e => console.error('Error push expediente creado cliente:', e));
+                }
+
+                // Notificar a TODOS los administradores
+                NotificationService.notifyAllAdmins({
+                    title: '📋 Expediente Clínico Creado - VetExóticos',
+                    body: `El expediente #${newExpediente.numero_expediente || newExpediente.id} (${pacNombre}) ha sido creado en el sistema.`,
+                    data: {
+                        tipo: 'EXPEDIENTE_GUARDADO_ADMIN',
+                        screen: 'Expedientes',
+                        expedienteId: String(newExpediente.id)
+                    }
+                }).catch(e => console.error('Error push expediente creado a admins:', e));
+            } catch (notifErr) {
+                console.warn('Error en notificación expediente creado:', notifErr.message);
+            }
+
             res.status(201).json({
                 success: true,
                 message: 'Expediente creado correctamente',
@@ -148,6 +181,41 @@ class ExpedienteController {
             }
 
             const updatedExpediente = await Expediente.update(id, req.body);
+
+            // Notificación Push: Expediente Actualizado
+            try {
+                const NotificationService = require('../services/notificationService');
+                const Paciente = require('../models/Paciente');
+                const Propietario = require('../models/Propietario');
+                const pacId = req.body.paciente_id || existingExpediente.paciente_id;
+                const pac = await Paciente.findById(pacId);
+                const pacNombre = pac ? pac.nombre : 'Paciente';
+                const prop = pac ? await Propietario.findById(pac.propietario_id) : null;
+                const numExp = req.body.numero_expediente || existingExpediente.numero_expediente || id;
+
+                if (prop && prop.usuario_id) {
+                    NotificationService.notifyExpedienteGuardado({
+                        usuarioId: prop.usuario_id,
+                        numeroExpediente: numExp,
+                        pacienteNombre: pacNombre,
+                        accion: 'actualizado',
+                        expedienteId: id
+                    }).catch(e => console.error('Error push expediente actualizado cliente:', e));
+                }
+
+                // Notificar a TODOS los administradores
+                NotificationService.notifyAllAdmins({
+                    title: '📋 Expediente Clínico Actualizado - VetExóticos',
+                    body: `El expediente #${numExp} (${pacNombre}) ha sido actualizado en el sistema.`,
+                    data: {
+                        tipo: 'EXPEDIENTE_GUARDADO_ADMIN',
+                        screen: 'Expedientes',
+                        expedienteId: String(id)
+                    }
+                }).catch(e => console.error('Error push expediente actualizado a admins:', e));
+            } catch (notifErr) {
+                console.warn('Error en notificación expediente actualizado:', notifErr.message);
+            }
 
             res.status(200).json({
                 success: true,

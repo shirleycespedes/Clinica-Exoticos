@@ -1,13 +1,32 @@
 import api from './api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { registerForPushNotificationsAsync } from './notificationService';
 
 export const login = async (email, password) => {
     try {
         const response = await api.post('/auth/login', { email, password });
         
         if (response.data.success) {
+            if (response.data.data?.token) {
+                await AsyncStorage.setItem('token', response.data.data.token);
+                await AsyncStorage.setItem('user', JSON.stringify(response.data.data.user));
+                registerForPushNotificationsAsync().catch(() => {});
+            }
+            return response.data;
+        }
+    } catch (error) {
+        throw error;
+    }
+};
+
+export const verifyLoginCode = async (email, code) => {
+    try {
+        const response = await api.post('/auth/verify-login', { email, code });
+
+        if (response.data.success) {
             await AsyncStorage.setItem('token', response.data.data.token);
             await AsyncStorage.setItem('user', JSON.stringify(response.data.data.user));
+            registerForPushNotificationsAsync().catch(() => {});
             return response.data;
         }
     } catch (error) {
@@ -72,6 +91,7 @@ export const loginWithGoogle = async (idToken) => {
         if (response.data.success) {
             await AsyncStorage.setItem('token', response.data.data.token);
             await AsyncStorage.setItem('user', JSON.stringify(response.data.data.user));
+            registerForPushNotificationsAsync().catch(() => {});
             return response.data;
         }
     } catch (error) {
