@@ -21,6 +21,8 @@ const {
  * @access Public
  */
 router.post('/register', validateRegister, AuthController.register);
+router.post('/verify-register', validateVerifyLogin, AuthController.verifyLogin);
+router.post('/resend-code', AuthController.resendCode);
 
 /**
  * @route POST /auth/login

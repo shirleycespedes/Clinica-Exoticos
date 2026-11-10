@@ -12,6 +12,98 @@ const Propietario = require('../models/Propietario');
 const { validationResult } = require('express-validator');
 const { pool } = require('../config/database');
 
+/**
+ * Elimina un usuario y todas sus dependencias en cascada (notificaciones, pedidos, citas, mascotas, etc.)
+ * para garantizar que cualquier cuenta (cliente, profesor, etc.) pueda eliminarse limpiamente sin errores de integridad referencial.
+ */
+async function cascadeDeleteUser(userId) {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // 1. Notificaciones del usuario
+        await connection.execute('DELETE FROM notificaciones WHERE usuario_id = ?', [userId]);
+
+        // 2. Pedidos y detalles de pedidos asociados a este usuario
+        const [pedidos] = await connection.execute(
+            'SELECT id FROM pedidos WHERE usuarios_id = ? OR usuario_id = ?',
+            [userId, userId]
+        );
+        if (pedidos.length > 0) {
+            const pedidoIds = pedidos.map(p => p.id);
+            const placeholders = pedidoIds.map(() => '?').join(',');
+            await connection.execute(
+                `DELETE FROM detalles_pedido WHERE pedidos_id IN (${placeholders})`,
+                pedidoIds
+            );
+            await connection.execute(
+                `DELETE FROM pedidos WHERE id IN (${placeholders})`,
+                pedidoIds
+            );
+        }
+
+        // 3. Movimientos de inventario registrados por este usuario
+        const [otherAdmins] = await connection.execute(
+            "SELECT id FROM usuarios WHERE rol = 'admin' AND id != ? LIMIT 1",
+            [userId]
+        );
+        if (otherAdmins.length > 0) {
+            await connection.execute(
+                'UPDATE movimientos_inventario SET usuario_id = ? WHERE usuario_id = ?',
+                [otherAdmins[0].id, userId]
+            );
+        } else {
+            await connection.execute(
+                'DELETE FROM movimientos_inventario WHERE usuario_id = ?',
+                [userId]
+            );
+        }
+
+        // 4. Propietarios y mascotas vinculadas (si es cliente o tiene ficha de propietario)
+        const [props] = await connection.execute(
+            'SELECT id FROM propietarios WHERE usuario_id = ?',
+            [userId]
+        );
+        for (const prop of props) {
+            const propId = prop.id;
+            const [pacientes] = await connection.execute(
+                'SELECT id FROM pacientes WHERE propietario_id = ?',
+                [propId]
+            );
+            for (const pac of pacientes) {
+                const pacId = pac.id;
+                const [expedientes] = await connection.execute(
+                    'SELECT id FROM expedientes WHERE paciente_id = ?',
+                    [pacId]
+                );
+                for (const exp of expedientes) {
+                    await connection.execute('DELETE FROM consultas WHERE expediente_id = ?', [exp.id]);
+                }
+                await connection.execute('DELETE FROM expedientes WHERE paciente_id = ?', [pacId]);
+                await connection.execute('DELETE FROM citas WHERE paciente_id = ?', [pacId]);
+                await connection.execute('DELETE FROM pacientes WHERE id = ?', [pacId]);
+            }
+            await connection.execute('DELETE FROM citas WHERE propietario_id = ?', [propId]);
+            await connection.execute('DELETE FROM propietarios WHERE id = ?', [propId]);
+        }
+
+        // 5. Finalmente eliminar el registro en usuarios
+        const [result] = await connection.execute(
+            'DELETE FROM usuarios WHERE id = ?',
+            [userId]
+        );
+
+        await connection.commit();
+        return result.affectedRows > 0;
+    } catch (err) {
+        await connection.rollback();
+        console.error(`Error en cascadeDeleteUser para usuario ${userId}:`, err);
+        throw err;
+    } finally {
+        connection.release();
+    }
+}
+
 class AuthController {
     /**
      * Registra un nuevo usuario (cliente)
@@ -115,19 +207,52 @@ class AuthController {
             }
 
 
-            const token = jwt.sign(
-                { userId: newUser.id, email: newUser.email, rol: newUser.rol },
-                process.env.JWT_SECRET || 'default_secret_key',
-                { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+            // Si es un administrador creado desde el panel administrativo por otro admin
+            if (finalRol === 'admin') {
+                return res.status(201).json({
+                    success: true,
+                    requireVerification: false,
+                    message: 'Administrador registrado con éxito.',
+                    data: {
+                        user: newUser
+                    }
+                });
+            }
+
+            // Para clientes (registro regular): Generar código de verificación de 6 dígitos
+            const code = Math.floor(100000 + Math.random() * 900000).toString();
+            const expires = new Date(Date.now() + 15 * 60 * 1000);
+
+            // Guardar código en la base de datos para verificación
+            await pool.execute(
+                'UPDATE usuarios SET reset_code = ?, reset_expires = ? WHERE id = ?',
+                [code, expires, newUser.id]
             );
+
+            // Enviar correo con el código de verificación
+            try {
+                await EmailService.sendVerificationEmail({
+                    to: newUser.email,
+                    nombre: newUser.nombre,
+                    code,
+                    type: 'register'
+                });
+            } catch (emailError) {
+                console.error('Error al enviar correo de verificación en registro:', emailError.message);
+                return res.status(503).json({
+                    success: false,
+                    message: 'No se pudo enviar el código de verificación a tu correo. Por favor verifica la dirección o intenta más tarde.',
+                    error: emailError.message
+                });
+            }
 
             res.status(201).json({
                 success: true,
-                message: 'Usuario registrado correctamente',
+                requireVerification: true,
+                message: 'Se ha enviado un código de verificación de 6 dígitos a tu correo electrónico para completar tu registro.',
                 data: {
-                    user: newUser,
-                    token,
-                    expiresIn: process.env.JWT_EXPIRES_IN || '24h'
+                    userId: newUser.id,
+                    email: newUser.email
                 }
             });
         } catch (error) {
@@ -298,6 +423,66 @@ class AuthController {
             res.status(500).json({
                 success: false,
                 message: 'Error al verificar el código de identidad',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Reenvía un código de verificación por correo (para registro o confirmación de identidad)
+     */
+    static async resendCode(req, res) {
+        try {
+            const { email, type = 'register' } = req.body;
+            if (!email) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El correo electrónico es requerido.'
+                });
+            }
+
+            const user = await Usuario.findByEmail(email.trim());
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No existe ningún usuario registrado con ese correo electrónico.'
+                });
+            }
+
+            // Generar nuevo código de 6 dígitos
+            const code = Math.floor(100000 + Math.random() * 900000).toString();
+            const expires = new Date(Date.now() + 15 * 60 * 1000);
+
+            await pool.execute(
+                'UPDATE usuarios SET reset_code = ?, reset_expires = ? WHERE id = ?',
+                [code, expires, user.id]
+            );
+
+            try {
+                await EmailService.sendVerificationEmail({
+                    to: user.email,
+                    nombre: user.nombre,
+                    code,
+                    type: type === 'login' ? 'login' : 'register'
+                });
+            } catch (emailError) {
+                console.error('Error al reenviar correo de verificación:', emailError.message);
+                return res.status(503).json({
+                    success: false,
+                    message: 'No se pudo reenviar el código de verificación por correo. Por favor intenta de nuevo en unos momentos.',
+                    error: emailError.message
+                });
+            }
+
+            res.status(200).json({
+                success: true,
+                message: 'Se ha reenviado un nuevo código de verificación a tu correo electrónico.'
+            });
+        } catch (error) {
+            console.error('Error en resendCode:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error al reenviar el código de verificación.',
                 error: error.message
             });
         }
@@ -531,7 +716,7 @@ class AuthController {
     }
 
     /**
-     * Elimina un usuario por su ID (solo admin)
+     * Elimina un usuario por su ID (solo admin) con limpieza en cascada de todos sus datos asociados
      */
     static async deleteUser(req, res) {
         try {
@@ -568,28 +753,12 @@ class AuthController {
                 }
             }
 
-            if (targetUser.rol === 'cliente') {
-                const prop = await Propietario.findByUsuarioId(targetUserId);
-                if (prop) {
-                    const [pacientes] = await pool.execute(
-                        'SELECT COUNT(*) as total FROM pacientes WHERE propietario_id = ?',
-                        [prop.id]
-                    );
-                    if (pacientes[0].total > 0) {
-                        return res.status(400).json({
-                            success: false,
-                            message: 'No se puede eliminar el cliente porque tiene mascotas registradas. Primero debes eliminar o transferir sus mascotas.'
-                        });
-                    }
-                    await pool.execute('DELETE FROM propietarios WHERE id = ?', [prop.id]);
-                }
-            }
-
-            await Usuario.delete(targetUserId);
+            // Eliminar usuario y todas sus dependencias (notificaciones, pedidos, citas, mascotas)
+            await cascadeDeleteUser(targetUserId);
 
             res.status(200).json({
                 success: true,
-                message: 'Usuario eliminado correctamente.'
+                message: 'Usuario eliminado correctamente junto con todos sus registros.'
             });
         } catch (error) {
             console.error('Error en deleteUser:', error);
@@ -602,7 +771,7 @@ class AuthController {
     }
 
     /**
-     * Elimina la propia cuenta del usuario firmado
+     * Elimina la propia cuenta del usuario firmado con limpieza en cascada
      */
     static async deleteOwnAccount(req, res) {
         try {
@@ -626,24 +795,8 @@ class AuthController {
                 }
             }
 
-            if (user.rol === 'cliente') {
-                const prop = await Propietario.findByUsuarioId(userId);
-                if (prop) {
-                    const [pacientes] = await pool.execute(
-                        'SELECT COUNT(*) as total FROM pacientes WHERE propietario_id = ?',
-                        [prop.id]
-                    );
-                    if (pacientes[0].total > 0) {
-                        return res.status(400).json({
-                            success: false,
-                            message: 'No puedes eliminar tu cuenta porque tienes mascotas registradas. Primero debes eliminar tus mascotas.'
-                        });
-                    }
-                    await pool.execute('DELETE FROM propietarios WHERE id = ?', [prop.id]);
-                }
-            }
-
-            await Usuario.delete(userId);
+            // Eliminar la cuenta del usuario y todas sus dependencias
+            await cascadeDeleteUser(userId);
 
             res.status(200).json({
                 success: true,

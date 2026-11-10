@@ -46,15 +46,29 @@ export const register = async (nombre, email, password, telefono, rol = 'cliente
         );
         
         if (response.data.success) {
-            if (!token) {
+            if (!token && response.data.data?.token) {
                 await AsyncStorage.setItem('token', response.data.data.token);
                 await AsyncStorage.setItem('user', JSON.stringify(response.data.data.user));
+                registerForPushNotificationsAsync().catch(() => {});
             }
             return response.data;
         }
     } catch (error) {
         throw error;
     }
+};
+
+export const resendVerificationCode = async (email, type = 'register') => {
+    try {
+        const response = await api.post('/auth/resend-code', { email, type });
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
+export const verifyRegisterCode = async (email, code) => {
+    return verifyLoginCode(email, code);
 };
 
 export const logout = async () => {

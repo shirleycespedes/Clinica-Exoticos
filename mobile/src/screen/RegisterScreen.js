@@ -9,12 +9,14 @@ import {
     KeyboardAvoidingView,
     Platform,
     ScrollView,
+    Alert,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { register } from './authService';
+import { register, verifyLoginCode, resendVerificationCode } from './authService';
 import { displaySystemNotification } from './notificationService';
 
 export default function RegisterScreen({ navigation }) {
+    const [step, setStep] = useState(1);
     const [nombre, setNombre] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -23,6 +25,12 @@ export default function RegisterScreen({ navigation }) {
     const [rol, setRol] = useState('cliente');
     const [currentUser, setCurrentUser] = useState(null);
     const [loading, setLoading] = useState(false);
+
+    // Estados para verificación de código en Paso 2
+    const [code, setCode] = useState('');
+    const [codeError, setCodeError] = useState('');
+    const [registeredEmail, setRegisteredEmail] = useState('');
+    const [resendCooldown, setResendCooldown] = useState(0);
 
     // Estados para errores de validación de campos
     const [nombreError, setNombreError] = useState('');
@@ -47,12 +55,26 @@ export default function RegisterScreen({ navigation }) {
         loadCurrentUser();
     }, []);
 
+    // Temporizador de cuenta regresiva para reenviar código
+    useEffect(() => {
+        let timer = null;
+        if (resendCooldown > 0) {
+            timer = setInterval(() => {
+                setResendCooldown(prev => (prev > 0 ? prev - 1 : 0));
+            }, 1000);
+        }
+        return () => {
+            if (timer) clearInterval(timer);
+        };
+    }, [resendCooldown]);
+
     const limpiarErrores = () => {
         setNombreError('');
         setEmailError('');
         setTelefonoError('');
         setPasswordError('');
         setConfirmPasswordError('');
+        setCodeError('');
         setGeneralError('');
         setSuccessMessage('');
     };
@@ -121,27 +143,41 @@ export default function RegisterScreen({ navigation }) {
 
         setLoading(true);
         try {
-            await register(nombre, email, password, telefono || undefined, rol);
+            const response = await register(nombre.trim(), email.trim(), password, telefono.trim() || undefined, rol);
             
-            if (rol === 'admin') {
+            if (rol === 'admin' && currentUser?.rol === 'admin') {
                 await displaySystemNotification(
                     '🛡️ Nuevo Administrador Registrado',
                     `Se ha otorgado acceso administrativo a ${nombre.trim()} (${email.trim()}).`,
                     { screen: 'Usuarios' }
                 );
+                setSuccessMessage('¡Administrador registrado correctamente!');
+                setTimeout(() => {
+                    navigation.replace('Usuarios');
+                }, 1500);
+                return;
             }
 
-            setSuccessMessage(
-                rol === 'admin'
-                    ? '¡Administrador registrado correctamente!'
-                    : '¡Registro completado con éxito!'
-            );
-            
-            // Espera corta para que el usuario pueda ver el mensaje de éxito antes de redirigir
-            setTimeout(() => {
-                navigation.replace('Dashboard');
-            }, 1500);
-
+            if (response?.requireVerification) {
+                setRegisteredEmail(email.trim());
+                setStep(2);
+                setCode('');
+                setResendCooldown(30);
+                if (Platform.OS === 'web') {
+                    alert('¡Código enviado! Revisa tu correo electrónico para completar el registro.');
+                } else {
+                    Alert.alert(
+                        'Código de Verificación Enviado',
+                        'Hemos enviado un código numérico de 6 dígitos a tu correo electrónico para completar tu registro.',
+                        [{ text: 'Entendido' }]
+                    );
+                }
+            } else {
+                setSuccessMessage('¡Registro completado con éxito!');
+                setTimeout(() => {
+                    navigation.replace('Dashboard');
+                }, 1500);
+            }
         } catch (error) {
             console.error('Error en el registro:', error);
             
@@ -157,10 +193,79 @@ export default function RegisterScreen({ navigation }) {
                 setGeneralError(
                     error.response?.data?.error || 
                     error.response?.data?.message || 
-                    error.message ||
+                    error.message || 
                     'Error al registrar la cuenta'
                 );
             }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleVerifyCode = async () => {
+        setCodeError('');
+        setGeneralError('');
+
+        if (!code.trim()) {
+            setCodeError('El código de verificación es requerido.');
+            return;
+        } else if (code.trim().length !== 6 || !/^\d{6}$/.test(code.trim())) {
+            setCodeError('El código debe contener exactamente 6 dígitos numéricos.');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            await verifyLoginCode(registeredEmail || email.trim(), code.trim());
+            setSuccessMessage('¡Cuenta verificada y activada con éxito!');
+            setTimeout(() => {
+                navigation.replace('Dashboard');
+            }, 1000);
+        } catch (error) {
+            console.error('Error al verificar código de registro:', error);
+
+            if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+                error.response.data.errors.forEach(err => {
+                    const path = err.path || err.param;
+                    if (path === 'code') setCodeError(err.msg);
+                });
+            } else {
+                setGeneralError(
+                    error.response?.data?.message ||
+                    error.userMessage ||
+                    error.message ||
+                    'El código ingresado es incorrecto o ha expirado.'
+                );
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleResendCode = async () => {
+        if (resendCooldown > 0 || loading) return;
+        setCodeError('');
+        setGeneralError('');
+        setLoading(true);
+        try {
+            await resendVerificationCode(registeredEmail || email.trim(), 'register');
+            setResendCooldown(30);
+            if (Platform.OS === 'web') {
+                alert('Se ha enviado un nuevo código de verificación a tu correo.');
+            } else {
+                Alert.alert(
+                    'Código Reenviado',
+                    'Se ha enviado un nuevo código de verificación a tu correo electrónico.',
+                    [{ text: 'OK' }]
+                );
+            }
+        } catch (error) {
+            console.error('Error al reenviar código:', error);
+            setGeneralError(
+                error.response?.data?.message ||
+                error.message ||
+                'No se pudo reenviar el código. Intenta nuevamente en unos momentos.'
+            );
         } finally {
             setLoading(false);
         }
@@ -176,11 +281,13 @@ export default function RegisterScreen({ navigation }) {
                 keyboardShouldPersistTaps="handled"
             >
                 <View style={styles.content}>
-                    <Text style={styles.title}>🦎 Registro</Text>
+                    <Text style={styles.title}>🦎 {step === 1 ? 'Registro' : 'VetExóticos'}</Text>
                     <Text style={styles.subtitle}>
-                        {currentUser && currentUser.rol === 'admin' 
-                            ? 'Registrar nuevo usuario desde Admin' 
-                            : 'Crea tu cuenta en VetExóticos'}
+                        {step === 1 
+                            ? (currentUser && currentUser.rol === 'admin' 
+                                ? 'Registrar nuevo usuario desde Admin' 
+                                : 'Crea tu cuenta en VetExóticos')
+                            : 'Verificación de Cuenta'}
                     </Text>
 
                     <View style={styles.form}>
@@ -196,139 +303,201 @@ export default function RegisterScreen({ navigation }) {
                             </View>
                         ) : null}
 
-                        <Text style={styles.label}>Nombre Completo *</Text>
-                        <TextInput
-                            style={[styles.input, nombreError ? styles.inputError : null]}
-                            placeholder="Ej. Juan Pérez"
-                            value={nombre}
-                            onChangeText={text => { setNombre(text); setNombreError(''); }}
-                            autoCapitalize="words"
-                        />
-                        {nombreError ? <Text style={styles.errorText}>{nombreError}</Text> : null}
+                        {step === 1 ? (
+                            <View>
+                                <Text style={styles.label}>Nombre Completo *</Text>
+                                <TextInput
+                                    style={[styles.input, nombreError ? styles.inputError : null]}
+                                    placeholder="Ej. Juan Pérez"
+                                    value={nombre}
+                                    onChangeText={text => { setNombre(text); setNombreError(''); }}
+                                    autoCapitalize="words"
+                                />
+                                {nombreError ? <Text style={styles.errorText}>{nombreError}</Text> : null}
 
-                        <Text style={styles.label}>Email *</Text>
-                        <TextInput
-                            style={[styles.input, emailError ? styles.inputError : null]}
-                            placeholder="Ej. juan@email.com"
-                            value={email}
-                            onChangeText={text => { setEmail(text); setEmailError(''); }}
-                            autoCapitalize="none"
-                            keyboardType="email-address"
-                        />
-                        {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
+                                <Text style={styles.label}>Email *</Text>
+                                <TextInput
+                                    style={[styles.input, emailError ? styles.inputError : null]}
+                                    placeholder="Ej. juan@email.com"
+                                    value={email}
+                                    onChangeText={text => { setEmail(text); setEmailError(''); }}
+                                    autoCapitalize="none"
+                                    keyboardType="email-address"
+                                />
+                                {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
 
-                        <Text style={styles.label}>Teléfono</Text>
-                        <TextInput
-                            style={[styles.input, telefonoError ? styles.inputError : null]}
-                            placeholder="Ej. +506 8888-8888"
-                            value={telefono}
-                            onChangeText={text => { setTelefono(text); setTelefonoError(''); }}
-                            keyboardType="phone-pad"
-                        />
-                        {telefonoError ? <Text style={styles.errorText}>{telefonoError}</Text> : null}
+                                <Text style={styles.label}>Teléfono</Text>
+                                <TextInput
+                                    style={[styles.input, telefonoError ? styles.inputError : null]}
+                                    placeholder="Ej. +506 8888-8888"
+                                    value={telefono}
+                                    onChangeText={text => { setTelefono(text); setTelefonoError(''); }}
+                                    keyboardType="phone-pad"
+                                />
+                                {telefonoError ? <Text style={styles.errorText}>{telefonoError}</Text> : null}
 
-                        {/* Cédula ya no se solicita para registro inicial de usuarios */}
+                                {/* Selector de rol únicamente si el usuario activo es administrador */}
+                                {currentUser && currentUser.rol === 'admin' && (
+                                    <View style={styles.roleContainer}>
+                                        <Text style={styles.label}>Rol de Usuario *</Text>
+                                        <View style={styles.roleOptions}>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.roleOptionButton,
+                                                    rol === 'cliente' && styles.roleOptionButtonActive,
+                                                ]}
+                                                onPress={() => setRol('cliente')}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.roleOptionText,
+                                                        rol === 'cliente' && styles.roleOptionTextActive,
+                                                    ]}
+                                                >
+                                                    Cliente
+                                                </Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.roleOptionButton,
+                                                    rol === 'admin' && styles.roleOptionButtonActive,
+                                                ]}
+                                                onPress={() => setRol('admin')}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.roleOptionText,
+                                                        rol === 'admin' && styles.roleOptionTextActive,
+                                                    ]}
+                                                >
+                                                    Administrador
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                )}
 
-                        {/* Mostrar selector de rol únicamente si el usuario activo es administrador */}
-                        {currentUser && currentUser.rol === 'admin' && (
-                            <View style={styles.roleContainer}>
-                                <Text style={styles.label}>Rol de Usuario *</Text>
-                                <View style={styles.roleOptions}>
-                                    <TouchableOpacity
-                                        style={[
-                                            styles.roleOptionButton,
-                                            rol === 'cliente' && styles.roleOptionButtonActive,
-                                        ]}
-                                        onPress={() => setRol('cliente')}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.roleOptionText,
-                                                rol === 'cliente' && styles.roleOptionTextActive,
-                                            ]}
-                                        >
-                                            Cliente
+                                <Text style={styles.label}>Contraseña *</Text>
+                                <Text style={styles.helperText}>
+                                    Mínimo 6 caracteres, con mayúscula, minúscula, número y carácter especial (@$!%*?&._-/#).
+                                </Text>
+                                <TextInput
+                                    style={[styles.input, passwordError ? styles.inputError : null]}
+                                    placeholder="Crea tu contraseña"
+                                    value={password}
+                                    onChangeText={text => { setPassword(text); setPasswordError(''); }}
+                                    secureTextEntry
+                                />
+                                {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
+
+                                <Text style={styles.label}>Confirmar Contraseña *</Text>
+                                <TextInput
+                                    style={[styles.input, confirmPasswordError ? styles.inputError : null]}
+                                    placeholder="Confirma tu contraseña"
+                                    value={confirmPassword}
+                                    onChangeText={text => { setConfirmPassword(text); setConfirmPasswordError(''); }}
+                                    secureTextEntry
+                                />
+                                {confirmPasswordError ? <Text style={styles.errorText}>{confirmPasswordError}</Text> : null}
+
+                                <TouchableOpacity
+                                    style={styles.button}
+                                    onPress={handleRegister}
+                                    disabled={loading}
+                                >
+                                    {loading ? (
+                                        <ActivityIndicator color="#fff" />
+                                    ) : (
+                                        <Text style={styles.buttonText}>
+                                            {currentUser && currentUser.rol === 'admin' 
+                                                ? 'Registrar Usuario' 
+                                                : 'Registrarse'}
                                         </Text>
-                                    </TouchableOpacity>
+                                    )}
+                                </TouchableOpacity>
+
+                                <View style={styles.loginContainer}>
+                                    <Text style={styles.loginText}>
+                                        {currentUser && currentUser.rol === 'admin'
+                                            ? '¿Deseas volver al Panel? '
+                                            : '¿Ya tienes una cuenta? '}
+                                    </Text>
                                     <TouchableOpacity
-                                        style={[
-                                            styles.roleOptionButton,
-                                            rol === 'admin' && styles.roleOptionButtonActive,
-                                        ]}
-                                        onPress={() => setRol('admin')}
+                                        onPress={() =>
+                                            currentUser && currentUser.rol === 'admin'
+                                                ? navigation.replace('Dashboard')
+                                                : navigation.navigate('Login')
+                                        }
                                     >
-                                        <Text
-                                            style={[
-                                                styles.roleOptionText,
-                                                rol === 'admin' && styles.roleOptionTextActive,
-                                            ]}
-                                        >
-                                            Administrador
+                                        <Text style={styles.loginLink}>
+                                            {currentUser && currentUser.rol === 'admin' 
+                                                ? 'Volver' 
+                                                : 'Inicia Sesión'}
                                         </Text>
                                     </TouchableOpacity>
                                 </View>
                             </View>
+                        ) : (
+                            <View>
+                                <Text style={styles.verifyHelperText}>
+                                    Hemos enviado un código de verificación de 6 dígitos a{' '}
+                                    <Text style={styles.emailHighlight}>{registeredEmail || email}</Text>.
+                                    {'\n'}Ingrésalo a continuación para activar tu cuenta e ingresar a la aplicación:
+                                </Text>
+
+                                <Text style={styles.label}>Código de Verificación (6 dígitos) *</Text>
+                                <TextInput
+                                    style={[styles.input, styles.codeInput, codeError ? styles.inputError : null]}
+                                    placeholder="000000"
+                                    value={code}
+                                    onChangeText={text => {
+                                        setCode(text.replace(/[^0-9]/g, ''));
+                                        setCodeError('');
+                                    }}
+                                    keyboardType="number-pad"
+                                    maxLength={6}
+                                    autoFocus
+                                />
+                                {codeError ? <Text style={styles.errorText}>{codeError}</Text> : null}
+
+                                <TouchableOpacity
+                                    style={styles.button}
+                                    onPress={handleVerifyCode}
+                                    disabled={loading}
+                                >
+                                    {loading ? (
+                                        <ActivityIndicator color="#fff" />
+                                    ) : (
+                                        <Text style={styles.buttonText}>Verificar y Completar Registro</Text>
+                                    )}
+                                </TouchableOpacity>
+
+                                <View style={styles.helperLinks}>
+                                    <TouchableOpacity
+                                        style={styles.halfLink}
+                                        onPress={handleResendCode}
+                                        disabled={loading || resendCooldown > 0}
+                                    >
+                                        <Text style={[styles.linkText, resendCooldown > 0 && styles.linkTextDisabled]}>
+                                            {resendCooldown > 0 ? `Reenviar en ${resendCooldown}s` : '🔄 Reenviar código'}
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={styles.halfLink}
+                                        onPress={() => {
+                                            setStep(1);
+                                            setCode('');
+                                            setCodeError('');
+                                            setGeneralError('');
+                                        }}
+                                        disabled={loading}
+                                    >
+                                        <Text style={styles.linkText}>← Corregir datos</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
                         )}
-
-                        <Text style={styles.label}>Contraseña *</Text>
-                        <Text style={styles.helperText}>
-                            Mínimo 6 caracteres, con mayúscula, minúscula, número y carácter especial (@$!%*?&._-/#).
-                        </Text>
-                        <TextInput
-                            style={[styles.input, passwordError ? styles.inputError : null]}
-                            placeholder="Crea tu contraseña"
-                            value={password}
-                            onChangeText={text => { setPassword(text); setPasswordError(''); }}
-                            secureTextEntry
-                        />
-                        {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
-
-                        <Text style={styles.label}>Confirmar Contraseña *</Text>
-                        <TextInput
-                            style={[styles.input, confirmPasswordError ? styles.inputError : null]}
-                            placeholder="Confirma tu contraseña"
-                            value={confirmPassword}
-                            onChangeText={text => { setConfirmPassword(text); setConfirmPasswordError(''); }}
-                            secureTextEntry
-                        />
-                        {confirmPasswordError ? <Text style={styles.errorText}>{confirmPasswordError}</Text> : null}
-
-                        <TouchableOpacity
-                            style={styles.button}
-                            onPress={handleRegister}
-                            disabled={loading}
-                        >
-                            {loading ? (
-                                <ActivityIndicator color="#fff" />
-                            ) : (
-                                <Text style={styles.buttonText}>
-                                    {currentUser && currentUser.rol === 'admin' 
-                                        ? 'Registrar Usuario' 
-                                        : 'Registrarse'}
-                                </Text>
-                            )}
-                        </TouchableOpacity>
-
-                        <View style={styles.loginContainer}>
-                            <Text style={styles.loginText}>
-                                {currentUser && currentUser.rol === 'admin'
-                                    ? '¿Deseas volver al Panel? '
-                                    : '¿Ya tienes una cuenta? '}
-                            </Text>
-                            <TouchableOpacity
-                                onPress={() =>
-                                    currentUser && currentUser.rol === 'admin'
-                                        ? navigation.replace('Dashboard')
-                                        : navigation.navigate('Login')
-                                }
-                            >
-                                <Text style={styles.loginLink}>
-                                    {currentUser && currentUser.rol === 'admin' 
-                                        ? 'Volver' 
-                                        : 'Inicia Sesión'}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
                     </View>
                 </View>
             </ScrollView>
@@ -395,6 +564,24 @@ const styles = StyleSheet.create({
     inputError: {
         borderColor: '#ef4444',
         backgroundColor: '#fef2f2',
+    },
+    codeInput: {
+        textAlign: 'center',
+        fontSize: 28,
+        fontWeight: 'bold',
+        letterSpacing: 8,
+        paddingVertical: 14,
+    },
+    verifyHelperText: {
+        fontSize: 14,
+        color: '#475569',
+        textAlign: 'center',
+        marginBottom: 20,
+        lineHeight: 20,
+    },
+    emailHighlight: {
+        fontWeight: 'bold',
+        color: '#2563eb',
     },
     errorText: {
         color: '#ef4444',
@@ -469,6 +656,23 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 18,
         fontWeight: 'bold',
+    },
+    helperLinks: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: 18,
+    },
+    halfLink: {
+        padding: 8,
+    },
+    linkText: {
+        color: '#2563eb',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    linkTextDisabled: {
+        color: '#94a3b8',
     },
     loginContainer: {
         flexDirection: 'row',

@@ -32,21 +32,26 @@ class EmailService {
      * @param {string} options.to - Correo de destino del usuario
      * @param {string} options.nombre - Nombre del usuario
      * @param {string} options.code - Código numérico de 6 dígitos
-     * @param {string} [options.type='login'] - 'login' o 'reset_password'
+     * @param {string} [options.type='login'] - 'login', 'register' o 'reset_password'
      */
     static async sendVerificationEmail({ to, nombre, code, type = 'login' }) {
-        const isLogin = type === 'login';
-        const subject = isLogin
-            ? 'Código de verificación de identidad - VetExóticos'
-            : 'Código de recuperación de contraseña - VetExóticos';
+        let subject = 'Código de verificación - VetExóticos';
+        let actionText = 'Utiliza el siguiente código para verificar tu cuenta en la aplicación:';
+        let footerNote = 'Si no realizaste esta solicitud, puedes ignorar este correo de forma segura.';
 
-        const actionText = isLogin
-            ? 'Recibimos un intento de inicio de sesión en tu cuenta. Utiliza el siguiente código para confirmar tu identidad e ingresar a la aplicación:'
-            : 'Recibimos una solicitud para restablecer tu contraseña. Utiliza el siguiente código para proceder con el restablecimiento de tu contraseña en la aplicación móvil:';
-
-        const footerNote = isLogin
-            ? 'Si no intentaste iniciar sesión, te recomendamos cambiar tu contraseña de inmediato.'
-            : 'Si no solicitaste este cambio, puedes ignorar este correo de forma segura. Tu contraseña actual no se modificará.';
+        if (type === 'login') {
+            subject = 'Código de verificación de identidad - VetExóticos';
+            actionText = 'Recibimos un intento de inicio de sesión en tu cuenta. Utiliza el siguiente código para confirmar tu identidad e ingresar a la aplicación:';
+            footerNote = 'Si no intentaste iniciar sesión, te recomendamos cambiar tu contraseña de inmediato.';
+        } else if (type === 'register') {
+            subject = 'Código de confirmación de registro - VetExóticos';
+            actionText = '¡Gracias por unirte a VetExóticos! Para activar tu cuenta y completar tu registro, utiliza el siguiente código de verificación:';
+            footerNote = 'Si no creaste una cuenta en VetExóticos, puedes ignorar este correo de forma segura.';
+        } else if (type === 'reset_password') {
+            subject = 'Código de recuperación de contraseña - VetExóticos';
+            actionText = 'Recibimos una solicitud para restablecer tu contraseña. Utiliza el siguiente código para proceder con el restablecimiento de tu contraseña en la aplicación:';
+            footerNote = 'Si no solicitaste este cambio, puedes ignorar este correo de forma segura. Tu contraseña actual no se modificará.';
+        }
 
         const html = `
             <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
